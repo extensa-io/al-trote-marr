@@ -51,6 +51,7 @@ export default function InstallHint() {
   const isIos = useSyncExternalStore(NO_SUBSCRIBE, readIsIos, () => false);
 
   const [event, setEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [waited, setWaited] = useState(false);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -58,7 +59,11 @@ export default function InstallHint() {
       setEvent(e as BeforeInstallPromptEvent);
     };
     window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
+    const timer = window.setTimeout(() => setWaited(true), 1500);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      window.clearTimeout(timer);
+    };
   }, []);
 
   function dismiss() {
@@ -79,7 +84,13 @@ export default function InstallHint() {
   }
 
   if (standalone || dismissed) return null;
-  const mode: "prompt" | "ios" | null = event ? "prompt" : isIos ? "ios" : null;
+  const mode: "prompt" | "ios" | "menu" | null = event
+    ? "prompt"
+    : isIos
+      ? "ios"
+      : waited
+        ? "menu"
+        : null;
   if (!mode) return null;
 
   return (
@@ -93,10 +104,16 @@ export default function InstallHint() {
           <p className="text-canvas-dim text-sm">
             Add Al Trote Marr to your home screen for a faster, full-screen run.
           </p>
-        ) : (
+        ) : mode === "ios" ? (
           <p className="text-canvas-dim text-sm">
             Tap <span className="font-mono text-canvas">Share</span> in Safari, then{" "}
             <span className="font-mono text-canvas">Add to Home Screen</span>.
+          </p>
+        ) : (
+          <p className="text-canvas-dim text-sm">
+            Open your browser&apos;s menu, then tap{" "}
+            <span className="font-mono text-canvas">Install app</span> or{" "}
+            <span className="font-mono text-canvas">Add to Home screen</span>.
           </p>
         )}
         {mode === "prompt" ? (

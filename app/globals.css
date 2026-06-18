@@ -16,6 +16,10 @@
   --font-mono: var(--font-mono), ui-monospace, monospace;
 }
 
+html {
+  font-size: 112.5%; /* 16px base → 18px; everything rem-based scales with it */
+}
+
 html,
 body {
   background: var(--color-field);
