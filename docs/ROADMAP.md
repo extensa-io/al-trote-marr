@@ -44,10 +44,10 @@ The richer stats view.
 Scope: implement every stat in `docs/ARCHITECTURE.md`. Add Recharts visuals for weekly planned-versus-actual volume, cumulative km versus plan, and long-run progression. Surface countdown, current phase with progress, overall and 4-week adherence, streak, zone-adherence, and the aerobic-efficiency trend. Add the optional estimated finish last, clearly labelled.
 
 Acceptance:
-- [ ] Each stat matches its formula and handles the no-data case
-- [ ] Charts render and stay readable at 360px wide
-- [ ] zone-adherence and aerobic-efficiency populate from logged easy runs
-- [ ] Nothing throws before any runs are logged
+- [x] Each stat matches its formula and handles the no-data case
+- [x] Charts render and stay readable at 360px wide
+- [x] zone-adherence and aerobic-efficiency populate from logged easy runs
+- [x] Nothing throws before any runs are logged
 
 ## Phase 4 — Polish
 

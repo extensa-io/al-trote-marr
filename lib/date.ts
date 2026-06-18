@@ -13,6 +13,11 @@ export function daysBetween(fromStr: string, toStr: string): number {
   return Math.round((to - from) / 86_400_000);
 }
 
+export function shiftDays(dateStr: string, days: number): string {
+  const t = Date.parse(dateStr + "T00:00:00Z");
+  return new Date(t + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 export function formatNiceDate(dateStr: string): string {
   // Treat YYYY-MM-DD as a calendar date; format in UTC so the day matches the string verbatim.
   const date = new Date(dateStr + "T00:00:00Z");
