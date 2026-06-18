@@ -30,8 +30,14 @@ export async function markStatus(date: string, status: string): Promise<ActionRe
   const updated = await updateSession(owner, date, { status: checked.value });
   if (!updated) return { ok: false, error: "not found" };
 
-  revalidatePath("/");
+  revalidateAll(date);
   return { ok: true, session: updated };
+}
+
+function revalidateAll(date: string) {
+  revalidatePath("/");
+  revalidatePath("/plan");
+  revalidatePath(`/plan/${date}`);
 }
 
 export async function logActual(date: string, input: ActualInput): Promise<ActionResult> {
@@ -47,6 +53,6 @@ export async function logActual(date: string, input: ActualInput): Promise<Actio
   });
   if (!updated) return { ok: false, error: "not found" };
 
-  revalidatePath("/");
+  revalidateAll(date);
   return { ok: true, session: updated };
 }

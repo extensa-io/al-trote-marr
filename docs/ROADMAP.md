@@ -32,10 +32,10 @@ Replace the spreadsheet grid with a phone-friendly plan.
 Scope: a `/plan` route listing all sessions grouped by week and phase, each row showing status. Tap a row to view and log or edit. Add a jump-to-current-week control and a phase filter. Add a bottom tab bar for Today, Plan, and Dashboard.
 
 Acceptance:
-- [ ] All 17 weeks render grouped by week with phase bands
-- [ ] Each row reflects status colour and planned km
-- [ ] Tapping a row opens the same log used on Today
-- [ ] Current week is easy to reach; phase filter works
+- [x] All 17 weeks render grouped by week with phase bands
+- [x] Each row reflects status colour and planned km
+- [x] Tapping a row opens the same log used on Today
+- [x] Current week is easy to reach; phase filter works
 
 ## Phase 3 — Dashboard
 

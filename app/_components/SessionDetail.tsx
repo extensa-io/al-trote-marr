@@ -9,7 +9,7 @@ interface Props {
   session: Session;
 }
 
-export default function TodayFocus({ session }: Props) {
+export default function SessionDetail({ session }: Props) {
   const [optimistic, addOptimistic] = useOptimistic<Session, Partial<Session>>(
     session,
     (current, patch) => ({ ...current, ...patch }),

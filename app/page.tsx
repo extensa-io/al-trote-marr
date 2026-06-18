@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 import { getNextSession, getProfile, getSession, listSessions } from "@/lib/db";
 import { daysBetween, todayStr } from "@/lib/date";
-import TodayFocus from "@/app/_components/TodayFocus";
+import SessionDetail from "@/app/_components/SessionDetail";
 import NextSession from "@/app/_components/NextSession";
 
 export default async function Home() {
@@ -53,7 +53,7 @@ export default async function Home() {
 
           <p className="eyebrow mb-2">Today</p>
           {todaySession ? (
-            <TodayFocus session={todaySession} />
+            <SessionDetail session={todaySession} />
           ) : (
             <section className="border border-line rounded-md p-5 text-canvas-dim text-sm">
               Rest day. Nothing scheduled today.

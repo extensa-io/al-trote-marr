@@ -24,6 +24,16 @@ export function formatNiceDate(dateStr: string): string {
   }).format(date);
 }
 
+export function formatDayShort(dateStr: string): string {
+  const date = new Date(dateStr + "T00:00:00Z");
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(date);
+}
+
 export function relativeDays(daysAhead: number): string {
   if (daysAhead === 0) return "today";
   if (daysAhead === 1) return "tomorrow";
