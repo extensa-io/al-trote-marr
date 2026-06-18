@@ -24,14 +24,22 @@ export default async function PlanDate({ params }: PageProps) {
 
   return (
     <main className="max-w-md mx-auto px-5 py-8">
-      <Link
-        href="/plan"
-        className="eyebrow text-canvas-dim hover:text-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass rounded-sm"
-      >
-        ← Plan
-      </Link>
+      <div className="flex items-baseline justify-between mb-6">
+        <Link
+          href="/plan"
+          className="eyebrow text-canvas-dim hover:text-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass rounded-sm"
+        >
+          ← Plan
+        </Link>
+        <Link
+          href="/settings"
+          className="eyebrow text-canvas-dim hover:text-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass rounded-sm"
+        >
+          Settings
+        </Link>
+      </div>
 
-      <p className="eyebrow mt-6 mb-2">{formatNiceDate(target.date)}</p>
+      <p className="eyebrow mb-2">{formatNiceDate(target.date)}</p>
       <SessionDetail session={target} />
     </main>
   );

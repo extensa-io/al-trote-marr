@@ -2,6 +2,7 @@
 
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { WeekVolume } from "@/lib/stats";
+import { useReducedMotion } from "@/lib/useReducedMotion";
 import { AXIS_PROPS, CHART_COLORS, LEGEND_STYLE, TOOLTIP_STYLE } from "./chart-theme";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function WeeklyVolumeChart({ data }: Props) {
+  const animate = !useReducedMotion();
   return (
     <section className="border border-line bg-panel rounded-md p-4">
       <p className="eyebrow mb-3 px-1">Weekly volume</p>
@@ -28,8 +30,8 @@ export default function WeeklyVolumeChart({ data }: Props) {
               ]}
             />
             <Legend wrapperStyle={LEGEND_STYLE} iconType="square" />
-            <Bar dataKey="planned" name="Planned" fill={CHART_COLORS.planned} radius={[2, 2, 0, 0]} />
-            <Bar dataKey="actual" name="Actual" fill={CHART_COLORS.actual} radius={[2, 2, 0, 0]} />
+            <Bar dataKey="planned" name="Planned" fill={CHART_COLORS.planned} radius={[2, 2, 0, 0]} isAnimationActive={animate} />
+            <Bar dataKey="actual" name="Actual" fill={CHART_COLORS.actual} radius={[2, 2, 0, 0]} isAnimationActive={animate} />
           </BarChart>
         </ResponsiveContainer>
       </div>

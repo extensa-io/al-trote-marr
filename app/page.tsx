@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
-import { auth, signOut } from "@/auth";
+import { auth } from "@/auth";
 import { getNextSession, getProfile, getSession, listSessions } from "@/lib/db";
 import { daysBetween, todayStr } from "@/lib/date";
 import SessionDetail from "@/app/_components/SessionDetail";
 import NextSession from "@/app/_components/NextSession";
+import PageHeader from "@/app/_components/PageHeader";
+import InstallHint from "@/app/_components/InstallHint";
 
 export default async function Home() {
   const session = await auth();
@@ -21,17 +23,7 @@ export default async function Home() {
 
   return (
     <main className="max-w-md mx-auto px-5 py-8">
-      <header className="flex items-baseline justify-between mb-8">
-        <h1 className="font-display font-bold text-brass text-2xl leading-none">Al Trote Marr!</h1>
-        <form
-          action={async () => {
-            "use server";
-            await signOut({ redirectTo: "/signin" });
-          }}
-        >
-          <button className="eyebrow hover:text-canvas transition">Sign out</button>
-        </form>
-      </header>
+      <PageHeader title="Al Trote Marr!" />
 
       {!profile ? (
         <section className="border border-line rounded-md p-6 text-center">
@@ -62,6 +54,10 @@ export default async function Home() {
 
           <div className="mt-6">
             <NextSession session={nextSession} fromDate={today} />
+          </div>
+
+          <div className="mt-6">
+            <InstallHint />
           </div>
         </>
       )}

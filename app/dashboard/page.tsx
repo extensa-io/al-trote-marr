@@ -23,6 +23,7 @@ import LongRunChart from "@/app/_components/dashboard/LongRunChart";
 import ZoneAdherenceCard from "@/app/_components/dashboard/ZoneAdherenceCard";
 import AerobicEfficiencyChart from "@/app/_components/dashboard/AerobicEfficiencyChart";
 import EstimatedFinishCard from "@/app/_components/dashboard/EstimatedFinishCard";
+import PageHeader from "@/app/_components/PageHeader";
 
 export default async function Dashboard() {
   const session = await auth();
@@ -34,9 +35,7 @@ export default async function Dashboard() {
 
   return (
     <main className="max-w-md mx-auto px-5 py-8">
-      <header className="mb-6">
-        <h1 className="font-display font-bold text-brass text-2xl leading-none">Dashboard</h1>
-      </header>
+      <PageHeader title="Dashboard" />
 
       {!profile || sessions.length === 0 ? (
         <section className="border border-line rounded-md p-6 text-center">

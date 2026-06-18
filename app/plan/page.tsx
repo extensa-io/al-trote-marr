@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { getProfile, listSessions } from "@/lib/db";
 import { formatDayShort, todayStr } from "@/lib/date";
 import type { Phase, Session } from "@/lib/types";
+import PageHeader from "@/app/_components/PageHeader";
 
 const PHASES: ReadonlyArray<Phase> = ["Base", "Build", "Peak", "Taper"];
 
@@ -28,7 +29,7 @@ export default async function PlanPage({ searchParams }: PageProps) {
   if (!profile || all.length === 0) {
     return (
       <main className="max-w-md mx-auto px-5 py-8">
-        <Header />
+        <PageHeader title="Plan" />
         <section className="border border-line rounded-md p-6 text-center mt-6">
           <p className="font-display uppercase tracking-widest text-canvas-dim text-sm mb-2">
             No plan yet
@@ -53,7 +54,7 @@ export default async function PlanPage({ searchParams }: PageProps) {
 
   return (
     <main className="max-w-md mx-auto px-5 py-8">
-      <Header />
+      <PageHeader title="Plan" />
 
       <nav aria-label="Filter by phase" className="flex flex-wrap gap-2 mt-6 mb-4">
         <PhaseChip href="/plan" active={activePhase == null}>
@@ -115,14 +116,6 @@ function groupByWeek(sessions: Session[]): Array<[number, Session[]]> {
     map.set(s.week, arr);
   }
   return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
-}
-
-function Header() {
-  return (
-    <header>
-      <h1 className="font-display font-bold text-brass text-2xl leading-none">Plan</h1>
-    </header>
-  );
 }
 
 function PhaseChip({

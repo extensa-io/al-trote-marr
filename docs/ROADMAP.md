@@ -54,7 +54,7 @@ Acceptance:
 Scope: loading and error states across screens, a `/settings` page with profile and sign out, an install hint, and an accessibility and responsive pass against the quality floor in `docs/DESIGN.md`.
 
 Acceptance:
-- [ ] Loading and error states on every data fetch
-- [ ] Keyboard focus visible, reduced motion respected
-- [ ] Lighthouse PWA installability passes
-- [ ] No layout breaks from 360px upward
+- [x] Loading and error states on every data fetch
+- [x] Keyboard focus visible, reduced motion respected
+- [x] Lighthouse PWA installability passes
+- [x] No layout breaks from 360px upward
