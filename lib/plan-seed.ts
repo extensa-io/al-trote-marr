@@ -1,6 +1,8 @@
-import type { Profile, Session } from "./types";
+import { shiftDays } from "./date";
+import type { Phase, Profile, Session, StrengthExercise } from "./types";
 
 export const OWNER = "nestor.daza@gmail.com";
+export const STRENGTH_TYPE = "Strength";
 
 export const profile: Profile = {
   ownerEmail: OWNER,
@@ -74,3 +76,120 @@ export const sessions: Seed[] = [
   { week: 17, date: "2026-10-10", day: "Sat", phase: "Taper", type: "Shakeout", title: "4k shakeout + 3x1 min at goal pace", zone: "Z2-Z3", plannedKm: 4.0 },
   { week: 17, date: "2026-10-11", day: "Sun", phase: "Taper", type: "Race", title: "RACE 21.1k. Open in upper Z2, then settle to goal", zone: "Z2-Z3", plannedKm: 21.1 },
 ];
+
+// --- Strength: short upper-body circuits on non-run days (Sunday stays rest) ---
+
+const WEEK1_MONDAY = "2026-06-15"; // Monday of plan week 1
+const PLAN_END = "2026-10-11"; // race day, last day of the plan
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// A rotation of distinct circuits so consecutive strength days never repeat.
+// Each pairs upper-body work with a dedicated abs/core finisher (distinct per
+// circuit), 2-3 sets, doable with a pair of dumbbells, bands, or just
+// bodyweight, in roughly 15-20 minutes.
+const CIRCUITS: ReadonlyArray<{ title: string; exercises: StrengthExercise[] }> = [
+  {
+    title: "Upper body & abs — Push",
+    exercises: [
+      { name: "Dumbbell floor press", detail: "3×12" },
+      { name: "Push-ups", detail: "3×10" },
+      { name: "Band chest press", detail: "3×15" },
+      { name: "Overhead triceps extension (DB)", detail: "2×12" },
+      { name: "Abs: bicycle crunches", detail: "3×20" },
+    ],
+  },
+  {
+    title: "Upper body & abs — Pull",
+    exercises: [
+      { name: "Bent-over dumbbell row", detail: "3×12" },
+      { name: "Band lat pulldown", detail: "3×15" },
+      { name: "Band pull-apart", detail: "3×15" },
+      { name: "Dumbbell biceps curl", detail: "2×12" },
+      { name: "Abs: hollow-body hold", detail: "3×30s" },
+    ],
+  },
+  {
+    title: "Upper body & abs — Shoulders",
+    exercises: [
+      { name: "Dumbbell overhead press", detail: "3×10" },
+      { name: "Lateral raise (DB)", detail: "3×12" },
+      { name: "Band face pull", detail: "3×15" },
+      { name: "Front raise (DB)", detail: "2×12" },
+      { name: "Abs: lying leg raises", detail: "3×15" },
+    ],
+  },
+  {
+    title: "Upper body & abs — Arms & grip",
+    exercises: [
+      { name: "Dumbbell hammer curl", detail: "3×12" },
+      { name: "Chair dips", detail: "3×12" },
+      { name: "Band biceps curl", detail: "3×15" },
+      { name: "Overhead triceps extension (DB)", detail: "2×12" },
+      { name: "Abs: Russian twists (DB)", detail: "3×20" },
+    ],
+  },
+  {
+    title: "Upper body & abs — Push/pull mix",
+    exercises: [
+      { name: "Push-ups", detail: "3×10" },
+      { name: "Bent-over dumbbell row", detail: "3×12" },
+      { name: "Band chest press", detail: "2×15" },
+      { name: "Band row", detail: "2×15" },
+      { name: "Abs: plank with shoulder taps", detail: "3×40s" },
+    ],
+  },
+  {
+    title: "Upper body & abs — Full circuit",
+    exercises: [
+      { name: "Dumbbell clean to press", detail: "3×10" },
+      { name: "Renegade row (DB)", detail: "3×8 each side" },
+      { name: "Band pull-apart", detail: "3×15" },
+      { name: "Dumbbell curl", detail: "2×12" },
+      { name: "Abs: dead bug", detail: "3×12 each side" },
+    ],
+  },
+];
+
+function weekday(dateStr: string): string {
+  return DAY_NAMES[new Date(dateStr + "T00:00:00Z").getUTCDay()];
+}
+
+function weekNumber(dateStr: string): number {
+  const days =
+    (Date.parse(dateStr + "T00:00:00Z") - Date.parse(WEEK1_MONDAY + "T00:00:00Z")) / 86_400_000;
+  return Math.floor(days / 7) + 1;
+}
+
+function phaseForWeek(week: number): Phase {
+  if (week <= 4) return "Base";
+  if (week <= 10) return "Build";
+  if (week <= 15) return "Peak";
+  return "Taper";
+}
+
+// One circuit on every non-run day except Sunday (the weekly full rest day),
+// across the whole plan window. Variety comes from rotating through CIRCUITS.
+export const strengthSessions: Seed[] = (() => {
+  const runDates = new Set(sessions.map((s) => s.date));
+  const out: Seed[] = [];
+  let i = 0;
+  for (let date = WEEK1_MONDAY; date <= PLAN_END; date = shiftDays(date, 1)) {
+    const day = weekday(date);
+    if (day === "Sun" || runDates.has(date)) continue;
+    const week = weekNumber(date);
+    const circuit = CIRCUITS[i % CIRCUITS.length];
+    out.push({
+      week,
+      date,
+      day,
+      phase: phaseForWeek(week),
+      type: STRENGTH_TYPE,
+      title: circuit.title,
+      zone: "",
+      plannedKm: 0,
+      exercises: circuit.exercises,
+    });
+    i++;
+  }
+  return out;
+})();

@@ -27,11 +27,13 @@ export default function NextSession({ session, fromDate }: Props) {
         </p>
       </div>
       <p className="font-display uppercase tracking-wider text-canvas text-sm mb-1">
-        {session.type} · {session.zone}
+        {session.type === "Strength" ? "Strength" : `${session.type} · ${session.zone}`}
       </p>
       <p className="text-canvas text-sm leading-snug mb-2">{session.title}</p>
       <p className="font-mono text-canvas-dim text-xs">
-        Planned {session.plannedKm} km · Week {session.week} · {session.phase}
+        {session.type === "Strength"
+          ? `~15-20 min · Week ${session.week} · ${session.phase}`
+          : `Planned ${session.plannedKm} km · Week ${session.week} · ${session.phase}`}
       </p>
     </section>
   );

@@ -1,5 +1,5 @@
 import { getDb } from "../lib/mongodb";
-import { OWNER, profile, sessions } from "../lib/plan-seed";
+import { OWNER, profile, sessions, strengthSessions } from "../lib/plan-seed";
 
 async function main() {
   const db = await getDb();
@@ -10,15 +10,18 @@ async function main() {
     { upsert: true }
   );
 
+  const all = [...sessions, ...strengthSessions];
   await db.collection("sessions").deleteMany({ ownerEmail: OWNER });
   await db.collection("sessions").insertMany(
-    sessions.map((s) => ({ ...s, ownerEmail: OWNER, status: "planned" as const }))
+    all.map((s) => ({ ...s, ownerEmail: OWNER, status: "planned" as const }))
   );
   await db
     .collection("sessions")
     .createIndex({ ownerEmail: 1, date: 1 }, { unique: true });
 
-  console.log(`Seeded ${sessions.length} sessions and 1 profile for ${OWNER}`);
+  console.log(
+    `Seeded ${sessions.length} runs + ${strengthSessions.length} strength sessions and 1 profile for ${OWNER}`
+  );
   process.exit(0);
 }
 

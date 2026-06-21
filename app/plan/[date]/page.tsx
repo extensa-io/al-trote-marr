@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import SessionDetail from "@/app/_components/SessionDetail";
+import StrengthDetail from "@/app/_components/StrengthDetail";
 import { getSession } from "@/lib/db";
 import { formatNiceDate } from "@/lib/date";
 
@@ -40,7 +41,11 @@ export default async function PlanDate({ params }: PageProps) {
       </div>
 
       <p className="eyebrow mb-2">{formatNiceDate(target.date)}</p>
-      <SessionDetail session={target} />
+      {target.type === "Strength" ? (
+        <StrengthDetail session={target} />
+      ) : (
+        <SessionDetail session={target} />
+      )}
     </main>
   );
 }
