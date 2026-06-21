@@ -37,6 +37,14 @@ export interface PushSubscriptionDoc {
   createdAt: string; // ISO timestamp
 }
 
+export interface DailySummary {
+  ownerEmail: string;
+  date: string; // YYYY-MM-DD, unique per owner
+  text: string;
+  model: string;
+  createdAt: string; // ISO timestamp
+}
+
 export interface Profile {
   ownerEmail: string;
   raceName: string;

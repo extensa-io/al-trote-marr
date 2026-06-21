@@ -1,5 +1,12 @@
 import { getDb } from "./mongodb";
-import type { Profile, Session, Status, Actual, PushSubscriptionDoc } from "./types";
+import type {
+  Profile,
+  Session,
+  Status,
+  Actual,
+  PushSubscriptionDoc,
+  DailySummary,
+} from "./types";
 
 const NO_ID = { projection: { _id: 0 } } as const;
 
@@ -92,4 +99,25 @@ export async function listAllPushSubscriptions(): Promise<PushSubscriptionDoc[]>
     .collection<PushSubscriptionDoc>("pushSubscriptions")
     .find({}, { projection: { _id: 0 } })
     .toArray();
+}
+
+export async function getDailySummary(
+  owner: string,
+  date: string
+): Promise<DailySummary | null> {
+  const db = await getDb();
+  return db
+    .collection<DailySummary>("dailySummaries")
+    .findOne({ ownerEmail: owner, date }, NO_ID);
+}
+
+export async function upsertDailySummary(summary: DailySummary): Promise<void> {
+  const db = await getDb();
+  await db
+    .collection<DailySummary>("dailySummaries")
+    .updateOne(
+      { ownerEmail: summary.ownerEmail, date: summary.date },
+      { $set: summary },
+      { upsert: true }
+    );
 }

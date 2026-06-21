@@ -1,11 +1,18 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { getNextSession, getProfile, getSession, listSessions } from "@/lib/db";
+import {
+  getDailySummary,
+  getNextSession,
+  getProfile,
+  getSession,
+  listSessions,
+} from "@/lib/db";
 import { daysBetween, todayStr } from "@/lib/date";
 import SessionDetail from "@/app/_components/SessionDetail";
 import NextSession from "@/app/_components/NextSession";
 import PageHeader from "@/app/_components/PageHeader";
 import InstallHint from "@/app/_components/InstallHint";
+import DailySummary from "@/app/_components/DailySummary";
 
 export default async function Home() {
   const session = await auth();
@@ -14,10 +21,11 @@ export default async function Home() {
 
   const profile = await getProfile(owner);
   const today = todayStr();
-  const [todaySession, nextSession, all] = await Promise.all([
+  const [todaySession, nextSession, all, summary] = await Promise.all([
     getSession(owner, today),
     getNextSession(owner, today),
     listSessions(owner),
+    getDailySummary(owner, today),
   ]);
   const done = all.filter((s) => s.status === "done").length;
 
@@ -42,6 +50,12 @@ export default async function Home() {
             <Stat label="Goal" value={profile.goal} />
             <Stat label="Logged" value={`${done}/${all.length}`} />
           </section>
+
+          {summary && (
+            <div className="mb-6">
+              <DailySummary summary={summary} />
+            </div>
+          )}
 
           <p className="eyebrow mb-2">Today</p>
           {todaySession ? (
