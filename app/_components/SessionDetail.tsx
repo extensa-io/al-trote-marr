@@ -67,7 +67,7 @@ export default function SessionDetail({ session }: Props) {
     const trimmedDuration = duration.trim();
     const parsedDuration = trimmedDuration === "" ? undefined : parseMmSs(trimmedDuration);
     if (trimmedDuration !== "" && parsedDuration == null) {
-      setError("Duration must be mm:ss, like 28:45");
+      setError("Duration must be minutes:seconds, like 28:45 or 28.45");
       return;
     }
 
@@ -170,14 +170,14 @@ export default function SessionDetail({ session }: Props) {
                 placeholder="138"
               />
             </Field>
-            <Field label="Duration (mm:ss)" htmlFor="duration">
+            <Field label="Duration (min:sec)" htmlFor="duration">
               <input
                 id="duration"
-                inputMode="numeric"
+                inputMode="decimal"
                 value={duration}
                 onChange={(e) => setDuration(e.target.value)}
                 className={inputClass}
-                placeholder="28:45"
+                placeholder="28:45 or 28.45"
               />
             </Field>
             <Field label="" htmlFor="">
