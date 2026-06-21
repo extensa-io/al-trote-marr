@@ -1,11 +1,26 @@
+// Accepts mm:ss, mm.ss, mm,ss, "mm ss", or a bare whole-minute count.
+// The separator is flexible because mobile numeric keypads have no colon;
+// the decimal/comma key is the only separator they expose. Returns minutes.
 export function parseMmSs(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
-  const match = /^(\d+):([0-5]\d)$/.exec(trimmed);
-  if (!match) return null;
-  const minutes = Number(match[1]);
-  const seconds = Number(match[2]);
-  return minutes + seconds / 60;
+
+  const tokens = trimmed.split(/[:.,\s]+/);
+
+  if (tokens.length === 1) {
+    if (!/^\d+$/.test(tokens[0])) return null;
+    return Number(tokens[0]);
+  }
+
+  if (tokens.length === 2) {
+    const [m, s] = tokens;
+    if (!/^\d+$/.test(m) || !/^\d{1,2}$/.test(s)) return null;
+    const seconds = Number(s);
+    if (seconds > 59) return null;
+    return Number(m) + seconds / 60;
+  }
+
+  return null;
 }
 
 export function formatMmSs(totalMinutes: number): string {
