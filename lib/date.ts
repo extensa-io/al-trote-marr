@@ -7,6 +7,16 @@ export function todayStr(tz = "America/Toronto"): string {
   }).format(new Date());
 }
 
+export function torontoHour(tz = "America/Toronto"): number {
+  // Current hour 0..23 in the given zone, DST-correct.
+  const hh = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    hour: "2-digit",
+    hour12: false,
+  }).format(new Date());
+  return parseInt(hh, 10) % 24;
+}
+
 export function daysBetween(fromStr: string, toStr: string): number {
   const from = Date.parse(fromStr + "T00:00:00Z");
   const to = Date.parse(toStr + "T00:00:00Z");

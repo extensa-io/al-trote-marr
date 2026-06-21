@@ -4,6 +4,7 @@ import { getProfile } from "@/lib/db";
 import { formatPace } from "@/lib/pace";
 import { formatNiceDate } from "@/lib/date";
 import PageHeader from "@/app/_components/PageHeader";
+import DailyReminderToggle from "./_components/DailyReminderToggle";
 
 export default async function Settings() {
   const session = await auth();
@@ -25,6 +26,8 @@ export default async function Settings() {
           <p className="font-mono text-canvas-dim text-xs">{session.user.email}</p>
         </div>
       </section>
+
+      <DailyReminderToggle />
 
       {profile ? (
         <>

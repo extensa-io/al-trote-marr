@@ -14,7 +14,7 @@ Personal multi-tenant running training tracker. You are continuing the build fro
 - Multi-tenant: every read and write is scoped by `ownerEmail` taken from the authenticated session. Never accept an owner value from the client.
 - Every route handler and server action checks `await auth()` and returns 401 when there is no session email.
 - Secrets live in env vars only. Never hardcode credentials. Never commit `.env.local`.
-- Online-only. Do not add offline caching or a service worker beyond the native `app/manifest.ts`.
+- Online-only. Do not add offline caching or background sync. The only service worker permitted is `public/sw.js`, which is push-only (handles `push` and `notificationclick`, no `fetch` handler, no `caches`). Do not extend it to cache or serve content.
 - Dates are `YYYY-MM-DD` strings, compared in `America/Toronto` via `lib/date.ts`. Do not introduce Date-object timezone math for calendar logic.
 - All new data access goes through `lib/db.ts`. Do not write Mongo queries inline in routes or components.
 
