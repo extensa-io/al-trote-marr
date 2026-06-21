@@ -22,7 +22,7 @@ export const profile: Profile = {
   ],
 };
 
-type Seed = Omit<Session, "ownerEmail" | "status" | "actual" | "updatedAt">;
+export type Seed = Omit<Session, "ownerEmail" | "status" | "actual" | "updatedAt">;
 
 export const sessions: Seed[] = [
   { week: 1, date: "2026-06-19", day: "Fri", phase: "Base", type: "Kickoff", title: "5k easy, settle in and check HR", zone: "Z2", plannedKm: 5.0 },
@@ -169,8 +169,8 @@ function phaseForWeek(week: number): Phase {
 
 // One circuit on every non-run day except Sunday (the weekly full rest day),
 // across the whole plan window. Variety comes from rotating through CIRCUITS.
-export const strengthSessions: Seed[] = (() => {
-  const runDates = new Set(sessions.map((s) => s.date));
+// Generated from a given runner's run dates so each plan gets its own schedule.
+export function generateStrengthSessions(runDates: Set<string>): Seed[] {
   const out: Seed[] = [];
   let i = 0;
   for (let date = WEEK1_MONDAY; date <= PLAN_END; date = shiftDays(date, 1)) {
@@ -192,4 +192,8 @@ export const strengthSessions: Seed[] = (() => {
     i++;
   }
   return out;
-})();
+}
+
+export const strengthSessions: Seed[] = generateStrengthSessions(
+  new Set(sessions.map((s) => s.date))
+);
