@@ -8,16 +8,22 @@ export interface Actual {
   notes?: string;
 }
 
+export interface StrengthExercise {
+  name: string;
+  detail: string; // sets × reps or hold, e.g. "3×12" or "2×30s"
+}
+
 export interface Session {
   ownerEmail: string;
   week: number;
   date: string; // YYYY-MM-DD
   day: string;
   phase: Phase;
-  type: string;
+  type: string; // run types (Easy, Quality, Long, …) or "Strength"
   title: string;
-  zone: string;
-  plannedKm: number;
+  zone: string; // empty for Strength
+  plannedKm: number; // 0 for Strength
+  exercises?: StrengthExercise[]; // present only on Strength sessions
   status: Status;
   actual?: Actual;
   updatedAt?: string;

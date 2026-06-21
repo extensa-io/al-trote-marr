@@ -166,10 +166,14 @@ function PlanRow({ session, today }: { session: Session; today: string }) {
         <div className="min-w-0">
           <p className="font-mono text-xs text-canvas-dim">{formatDayShort(session.date)}</p>
           <p className="text-canvas text-sm leading-snug truncate">
-            {session.type} · {session.zone}
+            {session.type === "Strength"
+              ? session.title
+              : `${session.type} · ${session.zone}`}
           </p>
         </div>
-        <p className="font-mono text-canvas text-sm shrink-0">{session.plannedKm} km</p>
+        <p className="font-mono text-canvas text-sm shrink-0">
+          {session.type === "Strength" ? "15-20 min" : `${session.plannedKm} km`}
+        </p>
       </div>
     </Link>
   );

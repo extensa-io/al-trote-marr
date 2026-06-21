@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { daysBetween, todayStr } from "@/lib/date";
 import SessionDetail from "@/app/_components/SessionDetail";
+import StrengthDetail from "@/app/_components/StrengthDetail";
 import NextSession from "@/app/_components/NextSession";
 import PageHeader from "@/app/_components/PageHeader";
 import InstallHint from "@/app/_components/InstallHint";
@@ -27,7 +28,8 @@ export default async function Home() {
     listSessions(owner),
     getDailySummary(owner, today),
   ]);
-  const done = all.filter((s) => s.status === "done").length;
+  const runs = all.filter((s) => s.type !== "Strength");
+  const done = runs.filter((s) => s.status === "done").length;
 
   return (
     <main className="max-w-md mx-auto px-5 py-8">
@@ -48,18 +50,16 @@ export default async function Home() {
           <section className="border border-line bg-panel rounded-md p-3 mb-6 flex justify-between text-center">
             <Stat label="Days to race" value={`${daysBetween(today, profile.raceDate)}`} />
             <Stat label="Goal" value={profile.goal} />
-            <Stat label="Logged" value={`${done}/${all.length}`} />
+            <Stat label="Logged" value={`${done}/${runs.length}`} />
           </section>
-
-          {summary && (
-            <div className="mb-6">
-              <DailySummary summary={summary} />
-            </div>
-          )}
 
           <p className="eyebrow mb-2">Today</p>
           {todaySession ? (
-            <SessionDetail session={todaySession} />
+            todaySession.type === "Strength" ? (
+              <StrengthDetail session={todaySession} />
+            ) : (
+              <SessionDetail session={todaySession} />
+            )
           ) : (
             <section className="border border-line rounded-md p-5 text-canvas-dim text-sm">
               Rest day. Nothing scheduled today.
@@ -69,6 +69,12 @@ export default async function Home() {
           <div className="mt-6">
             <NextSession session={nextSession} fromDate={today} />
           </div>
+
+          {summary && (
+            <div className="mt-6">
+              <DailySummary summary={summary} />
+            </div>
+          )}
 
           <div className="mt-6">
             <InstallHint />

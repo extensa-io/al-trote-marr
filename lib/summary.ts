@@ -34,7 +34,9 @@ export function buildSummaryPrompt(
   profile: Profile,
   today: string
 ): string | null {
-  const due = sessions.filter((s) => s.date <= today);
+  // Strength is tracked separately; the running note ignores it.
+  const runs = sessions.filter((s) => s.type !== "Strength");
+  const due = runs.filter((s) => s.date <= today);
   if (due.length === 0) return null;
 
   const lines: string[] = [];
@@ -54,8 +56,8 @@ export function buildSummaryPrompt(
   );
   lines.push(`Current done streak: ${streak(sessions, today)} sessions.`);
 
-  const weeks = weeklyVolume(sessions).filter((w) =>
-    sessions.some((s) => s.week === w.week && s.date <= today)
+  const weeks = weeklyVolume(runs).filter((w) =>
+    runs.some((s) => s.week === w.week && s.date <= today)
   );
   const recentWeeks = weeks.slice(-4);
   if (recentWeeks.length) {
@@ -103,12 +105,12 @@ export function buildSummaryPrompt(
     }
   }
 
-  const todays = sessions.find((s) => s.date === today);
+  const todays = runs.find((s) => s.date === today);
   lines.push("");
   lines.push(
     todays
       ? `Today's session: ${todays.type} (${todays.zone}) — ${todays.title}, planned ${todays.plannedKm} km.`
-      : "Today is a rest day."
+      : "Today is a rest or strength day (no run)."
   );
 
   return lines.join("\n");

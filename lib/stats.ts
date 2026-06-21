@@ -5,6 +5,9 @@ import type { Phase, Profile, Session } from "./types";
 const EASY_TYPES = new Set(["Easy", "Long", "Kickoff", "Shakeout"]);
 const RACE_DISTANCE_KM = 21.0975;
 
+// Strength sessions are tracked separately and must not reshape running metrics.
+const isRunSession = (s: Session): boolean => s.type !== "Strength";
+
 export interface Countdown {
   daysToRace: number;
   weeksToRace: number;
@@ -64,6 +67,7 @@ export function countdown(profile: Profile, today: string): Countdown {
 }
 
 export function phaseStatus(sessions: Session[], today: string): PhaseStatus {
+  sessions = sessions.filter(isRunSession);
   if (sessions.length === 0) return { phase: null, progress: 0 };
   const past = sessions.filter((s) => s.date <= today);
   const phase = past.length ? past[past.length - 1].phase : sessions[0].phase;
@@ -74,12 +78,14 @@ export function phaseStatus(sessions: Session[], today: string): PhaseStatus {
 }
 
 export function adherenceOverall(sessions: Session[], today: string): AdherenceCounts {
+  sessions = sessions.filter(isRunSession);
   const due = sessions.filter((s) => s.date <= today);
   const done = due.filter((s) => s.status === "done").length;
   return { done, due: due.length, ratio: due.length === 0 ? 0 : done / due.length };
 }
 
 export function adherence4wk(sessions: Session[], today: string): AdherenceCounts {
+  sessions = sessions.filter(isRunSession);
   const windowStart = shiftDays(today, -27); // inclusive 28-day window ending today
   const due = sessions.filter((s) => s.date >= windowStart && s.date <= today);
   const done = due.filter((s) => s.status === "done").length;
@@ -88,7 +94,7 @@ export function adherence4wk(sessions: Session[], today: string): AdherenceCount
 
 export function streak(sessions: Session[], today: string): number {
   const due = sessions
-    .filter((s) => s.date <= today)
+    .filter((s) => isRunSession(s) && s.date <= today)
     .sort((a, b) => b.date.localeCompare(a.date));
   let count = 0;
   for (const s of due) {
@@ -100,7 +106,7 @@ export function streak(sessions: Session[], today: string): number {
 
 export function weeklyVolume(sessions: Session[]): WeekVolume[] {
   const map = new Map<number, WeekVolume>();
-  for (const s of sessions) {
+  for (const s of sessions.filter(isRunSession)) {
     const entry = map.get(s.week) ?? { week: s.week, planned: 0, actual: 0 };
     entry.planned += s.plannedKm;
     if (s.status === "done" && typeof s.actual?.km === "number") entry.actual += s.actual.km;
@@ -110,7 +116,7 @@ export function weeklyVolume(sessions: Session[]): WeekVolume[] {
 }
 
 export function cumulativeKm(sessions: Session[]): CumulativePoint[] {
-  const ordered = [...sessions].sort((a, b) => a.date.localeCompare(b.date));
+  const ordered = sessions.filter(isRunSession).sort((a, b) => a.date.localeCompare(b.date));
   let plannedSum = 0;
   let actualSum = 0;
   let started = false;
