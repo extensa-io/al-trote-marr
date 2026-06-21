@@ -77,6 +77,12 @@ Compute these from the owner's sessions and profile. "Due" means `date <= today`
 - **aerobicEfficiency** (fitness trend): for each logged easy-type run with km, durationMin, and avgHr, `efficiency = (actual.km * 1000 / (actual.durationMin * 60)) / actual.avgHr` in metres per second per beat. Plot by date; a rising trend means the aerobic engine is improving. Needs several data points before it reads meaningfully.
 - **estimatedFinish** (optional, phase 3 stretch): a rough projection from the most recent logged Quality or goal-pace session pace, scaled to 21.1 km, shown only once at least one such run is logged and clearly labelled an estimate. Do not over-engineer; segment-level splits are out of scope.
 
+## Daily reminder (web push)
+
+An opt-in 7:00 AM `America/Toronto` notification with the day's session and a one-line journey summary. A push-only service worker (`public/sw.js`) receives the push; it never caches. Users opt in from `/settings`, which subscribes through `PushManager` and stores the subscription in a third owner-scoped collection, `pushSubscriptions` (`{ ownerEmail, endpoint, keys, createdAt }`, unique index on `endpoint`), via `lib/db.ts`. `POST /api/push/subscribe` and `/api/push/unsubscribe` are auth-checked like every other route.
+
+Delivery is a Vercel Cron job (`vercel.json`) that hits `/api/cron/daily-notify` hourly. That route is the one machine-to-machine exception to the `auth()` rule: it has no session, so it is gated by a `CRON_SECRET` bearer token instead. It sends only on the run where the Toronto local hour equals `NOTIFY_HOUR` (default 7), which keeps delivery at 7 AM exactly across DST. For each owner with a subscription it builds the message from that owner's own sessions and profile (`lib/notify.ts`), sends with `web-push` (`lib/push.ts`), and prunes any endpoint returning 404/410. VAPID keys live in env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, plus `NEXT_PUBLIC_VAPID_PUBLIC_KEY` for the client).
+
 ## Out of scope (for now)
 - Offline support and background sync.
 - Garmin or Strava import. The schema leaves room (`actual` could later be auto-filled from a pulled activity), but no integration is built.

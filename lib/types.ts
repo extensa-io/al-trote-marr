@@ -30,6 +30,13 @@ export interface Zone {
   max: number;
 }
 
+export interface PushSubscriptionDoc {
+  ownerEmail: string;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  createdAt: string; // ISO timestamp
+}
+
 export interface Profile {
   ownerEmail: string;
   raceName: string;
