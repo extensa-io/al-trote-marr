@@ -5,15 +5,27 @@ import type { DailyMessage } from "./notify";
 
 let configured = false;
 
+// web-push requires the VAPID subject to be a mailto: or https: URL. A bare
+// email (e.g. "info@extensa.io") is an easy misconfiguration that otherwise
+// throws deep inside setVapidDetails, so coerce one to a mailto: URL here.
+function normalizeSubject(raw: string): string {
+  const s = raw.trim();
+  if (/^(mailto:|https?:\/\/)/i.test(s)) return s;
+  if (s.includes("@")) return `mailto:${s}`;
+  return s;
+}
+
 function configure(): void {
   if (configured) return;
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
   const subject = process.env.VAPID_SUBJECT;
   if (!publicKey || !privateKey || !subject) {
-    throw new Error("VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must be set");
+    throw new Error(
+      "push not configured: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must all be set"
+    );
   }
-  webpush.setVapidDetails(subject, publicKey, privateKey);
+  webpush.setVapidDetails(normalizeSubject(subject), publicKey, privateKey);
   configured = true;
 }
 

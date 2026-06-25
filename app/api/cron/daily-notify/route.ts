@@ -50,18 +50,27 @@ export async function GET(req: Request) {
 
   let sent = 0;
   let pruned = 0;
-  for (const [owner, ownerSubs] of byOwner) {
-    const [sessions, profile] = await Promise.all([listSessions(owner), getProfile(owner)]);
-    const message = buildDailyMessage(sessions, profile, today);
+  let pushError: string | null = null;
+  try {
+    for (const [owner, ownerSubs] of byOwner) {
+      const [sessions, profile] = await Promise.all([listSessions(owner), getProfile(owner)]);
+      const message = buildDailyMessage(sessions, profile, today);
 
-    for (const sub of ownerSubs) {
-      const result = await sendPush(sub, message);
-      if (result.ok) sent++;
-      else if (result.expired) {
-        await deletePushSubscriptionByEndpoint(sub.endpoint);
-        pruned++;
+      for (const sub of ownerSubs) {
+        const result = await sendPush(sub, message);
+        if (result.ok) sent++;
+        else if (result.expired) {
+          await deletePushSubscriptionByEndpoint(sub.endpoint);
+          pruned++;
+        }
       }
     }
+  } catch (err) {
+    // A misconfigured VAPID setup throws from sendPush's configure() before any
+    // notification goes out. Surface it in the response instead of an opaque 500
+    // so a manual cron hit shows the cause.
+    pushError = err instanceof Error ? err.message : String(err);
+    console.error("push send failed:", err);
   }
 
   // 2. AI progress note for every allowlisted runner (idempotent per date, so
@@ -78,9 +87,14 @@ export async function GET(req: Request) {
   }
 
   return Response.json({
-    ok: true,
+    ok: !pushError,
     date: today,
-    push: { recipients: subs.length, sent, pruned },
+    push: {
+      recipients: subs.length,
+      sent,
+      pruned,
+      ...(pushError ? { error: pushError } : {}),
+    },
     summaries,
   });
 }
