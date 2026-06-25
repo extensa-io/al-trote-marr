@@ -5,6 +5,7 @@ import {
   listSessions,
   upsertDailySummary,
 } from "./db";
+import { shiftDays } from "./date";
 import { formatPace, paceSecPerKm } from "./pace";
 import {
   adherence4wk,
@@ -39,6 +40,15 @@ export function buildSummaryPrompt(
   const due = runs.filter((s) => s.date <= today);
   if (due.length === 0) return null;
 
+  // The note is a morning retrospective: today's session hasn't happened yet,
+  // so counting it as "due but not done" wrongly drags adherence, zeroes the
+  // streak, and makes the in-progress week look short on volume. Build every
+  // backward-looking metric from sessions that have actually come due — those
+  // dated on or before `cutoff` (strictly before today). Today is still
+  // surfaced on its own line below and drives the race countdown.
+  const cutoff = shiftDays(today, -1);
+  const elapsed = runs.filter((s) => s.date <= cutoff);
+
   const lines: string[] = [];
 
   const { daysToRace, weeksToRace } = countdown(profile, today);
@@ -46,26 +56,25 @@ export function buildSummaryPrompt(
     `Race: ${profile.raceName} on ${profile.raceDate} (${daysToRace} days / ${weeksToRace} weeks away). Goal: ${profile.goal}.`
   );
 
-  const { phase, progress } = phaseStatus(sessions, today);
+  const { phase, progress } = phaseStatus(sessions, cutoff);
   if (phase) lines.push(`Current phase: ${phase}, ${formatPercent(progress)} through it.`);
 
-  const overall = adherenceOverall(sessions, today);
-  const recent = adherence4wk(sessions, today);
-  lines.push(
-    `Adherence overall: ${overall.done}/${overall.due} (${formatPercent(overall.ratio)}). Last 4 weeks: ${recent.done}/${recent.due} (${formatPercent(recent.ratio)}).`
-  );
-  lines.push(`Current done streak: ${streak(sessions, today)} sessions.`);
-
-  const weeks = weeklyVolume(runs).filter((w) =>
-    runs.some((s) => s.week === w.week && s.date <= today)
-  );
-  const recentWeeks = weeks.slice(-4);
-  if (recentWeeks.length) {
+  if (elapsed.length) {
+    const overall = adherenceOverall(sessions, cutoff);
+    const recent = adherence4wk(sessions, cutoff);
     lines.push(
-      `Weekly km (planned vs done), recent weeks: ${recentWeeks
-        .map((w) => `W${w.week} ${w.planned}/${w.actual}`)
-        .join(", ")}.`
+      `Adherence overall: ${overall.done}/${overall.due} (${formatPercent(overall.ratio)}). Last 4 weeks: ${recent.done}/${recent.due} (${formatPercent(recent.ratio)}).`
     );
+    lines.push(`Current done streak: ${streak(sessions, cutoff)} sessions.`);
+
+    const recentWeeks = weeklyVolume(elapsed).slice(-4);
+    if (recentWeeks.length) {
+      lines.push(
+        `Weekly km (planned vs done), recent weeks: ${recentWeeks
+          .map((w) => `W${w.week} ${w.planned}/${w.actual}`)
+          .join(", ")}.`
+      );
+    }
   }
 
   const zone = zoneAdherence(sessions, profile);
@@ -85,7 +94,7 @@ export function buildSummaryPrompt(
     );
   }
 
-  const logged = due
+  const logged = elapsed
     .filter((s) => s.status === "done" || s.status === "skipped")
     .slice(-8);
   if (logged.length) {
