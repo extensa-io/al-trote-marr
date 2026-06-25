@@ -125,7 +125,7 @@ export default function DailyReminderToggle() {
       <p className="eyebrow mb-3">Daily reminder</p>
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm text-canvas-dim">
-          A 7:00 AM notification with the day&apos;s session and where you are on the plan.
+          A 5:00 AM notification with the day&apos;s session and where you are on the plan.
         </p>
         {state === "unsupported" ? (
           <span className="font-mono text-xs text-canvas-dim shrink-0">Not supported</span>
