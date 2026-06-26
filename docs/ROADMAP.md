@@ -57,8 +57,8 @@ Scope: reschedule a single run to any date from its card, with a swap offer when
 
 Acceptance:
 - [x] A planned/skipped run can be moved to an empty date; `day` updates, `week` and km unchanged
-- [x] Moving onto another movable run offers a swap; onto strength/done is blocked with a message
-- [x] Week-shift moves all movable runs in a week and aborts wholesale on any clash
+- [x] Moving onto another planned/skipped session (run or strength) offers a swap; runs take priority, only a done session can't be displaced
+- [x] Week-shift slides every planned/skipped session in the week (runs and strength) together; blocks only on a stationary session outside the shift
 - [x] Multi-doc moves are atomic (temp-date transaction), no duplicate-key errors
 
 ## Phase 5 — Logging detail & weight

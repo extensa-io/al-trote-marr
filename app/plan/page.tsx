@@ -95,10 +95,7 @@ export default async function PlanPage({ searchParams }: PageProps) {
                 >
                   Week {week}
                 </h2>
-                {sessions.some(
-                  (s) =>
-                    s.type !== "Strength" && (s.status === "planned" || s.status === "skipped"),
-                ) ? (
+                {sessions.some((s) => s.status === "planned" || s.status === "skipped") ? (
                   <WeekShiftControls week={week} />
                 ) : null}
               </div>

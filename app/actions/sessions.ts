@@ -106,7 +106,10 @@ export async function rescheduleRun(
   if (!target) {
     await moveSessions(owner, [{ from: fromDate, to: toDate }]);
   } else {
-    const swappable = target.type !== "Strength" && MOVABLE.has(target.status);
+    // Runs take priority: a planned/skipped session on the target day (run or
+    // strength) yields by swapping into the run's vacated date. Only a logged
+    // (done) session can't be displaced.
+    const swappable = MOVABLE.has(target.status);
     if (!opts?.swap || !swappable) {
       return { ok: false, conflict: { date: toDate, label: sessionLabel(target), swappable } };
     }
@@ -128,22 +131,25 @@ export async function shiftWeek(week: number, deltaDays: number): Promise<ShiftR
   if (!owner) return { ok: false, error: "unauthorized" };
   if (deltaDays === 0) return { ok: false, error: "nothing to shift" };
 
+  // Slide the whole week: every planned/skipped session moves together, runs and
+  // strength, so the week keeps its shape and any free day absorbs the shift.
   const inWeek = await getSessionsInWeek(owner, week);
-  const movers = inWeek.filter((s) => s.type !== "Strength" && MOVABLE.has(s.status));
-  if (movers.length === 0) return { ok: false, error: "no movable runs this week" };
+  const movers = inWeek.filter((s) => MOVABLE.has(s.status));
+  if (movers.length === 0) return { ok: false, error: "no movable sessions this week" };
 
   const moverDates = new Set(movers.map((s) => s.date));
   const moves = movers.map((s) => ({ from: s.date, to: shiftDays(s.date, deltaDays) }));
 
-  // Block if any target lands on a session that isn't itself moving (strength,
-  // done run, or a session in another week). No partial shift.
+  // A target landing on another mover's date is fine (they all move). Only a
+  // stationary session outside this shift (a logged day, or one in an adjacent
+  // week) blocks it.
   for (const m of moves) {
     if (moverDates.has(m.to)) continue;
     const occupant = await getSession(owner, m.to);
     if (occupant) {
       return {
         ok: false,
-        error: `Can't shift: ${m.to} already has a ${sessionLabel(occupant)}.`,
+        error: `Can't shift: ${m.to} already has a ${sessionLabel(occupant)} outside this week.`,
       };
     }
   }

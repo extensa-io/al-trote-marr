@@ -28,7 +28,7 @@ One document per training session.
 
 Unique index: `{ ownerEmail: 1, date: 1 }`.
 
-Rescheduling a run changes only its `date` and recomputed `day`; `week` is preserved so plan-week stats stay stable. Only `planned`/`skipped` runs move (never `done`, never `Strength`). Moving onto an empty date is a plain update; onto another movable run it offers a date swap; onto a `done` run or `Strength` it is blocked. Multi-document moves (swap, week-shift) go through a temp-date two-phase transaction in `lib/db.ts` (`moveSessions`) to respect the unique index atomically.
+Rescheduling changes only a session's `date` and recomputed `day`; `week` is preserved so plan-week stats stay stable. A run is moved from its card. Moving onto an empty date is a plain update; onto any other `planned`/`skipped` session (run **or** strength) it offers a swap, the run taking the target day and the occupant taking the run's vacated date (runs have priority); only an already-`done` session can't be displaced. The week-shift control slides the whole week: every `planned`/`skipped` session that week, runs and strength, moves by the delta together, so a free day in the week absorbs the shift; it blocks only when a moving session would land on a stationary session outside the shift (a `done` day or one in an adjacent week). Multi-document moves go through a temp-date two-phase transaction in `lib/db.ts` (`moveSessions`) to respect the unique index atomically.
 
 ### profile
 One document per runner.
