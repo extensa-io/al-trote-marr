@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import SessionDetail from "@/app/_components/SessionDetail";
 import StrengthDetail from "@/app/_components/StrengthDetail";
-import { getProfile, getSession } from "@/lib/db";
+import RunRecap from "@/app/_components/RunRecap";
+import { getDailySummary, getProfile, getSession } from "@/lib/db";
 import { formatNiceDate } from "@/lib/date";
 import { hrTargetForZone } from "@/lib/prescription";
 
@@ -21,8 +22,15 @@ export default async function PlanDate({ params }: PageProps) {
   const { date } = await params;
   if (!DATE_RE.test(date)) notFound();
 
-  const [target, profile] = await Promise.all([getSession(owner, date), getProfile(owner)]);
+  const [target, profile, entry] = await Promise.all([
+    getSession(owner, date),
+    getProfile(owner),
+    getDailySummary(owner, date),
+  ]);
   if (!target) notFound();
+
+  // Surface the run's recap for any past day, not just today's home slot.
+  const recap = entry?.kind === "recap" ? entry : null;
 
   return (
     <main className="max-w-md mx-auto px-5 py-8">
@@ -49,6 +57,12 @@ export default async function PlanDate({ params }: PageProps) {
           session={target}
           hrTarget={profile ? hrTargetForZone(target.zone, profile.zones) : null}
         />
+      )}
+
+      {recap && (
+        <div className="mt-6">
+          <RunRecap entry={recap} isRace={target.type === "Race"} />
+        </div>
       )}
     </main>
   );

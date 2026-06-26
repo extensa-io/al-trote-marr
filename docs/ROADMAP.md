@@ -49,6 +49,19 @@ Acceptance:
 - [x] zone-adherence and aerobic-efficiency populate from logged easy runs
 - [x] Nothing throws before any runs are logged
 
+## Phase 7 — Post-run recap
+
+Turn a freshly logged run into an AI recap that replaces the daily progress note.
+
+Scope: when a run is marked done, generate a recap of it (short narrative plus `insights` and `suggestions`) and show it in the home slot where the daily note lives, keyed by date in `dailySummaries` with `kind: "recap"`. The log saves instantly; the card shows a "Writing recap…" placeholder, then fills in. Editing the run regenerates it; the next morning's cron note takes the slot back. Every logged run qualifies (not just races); strength and skipped sessions don't.
+
+Acceptance:
+- [x] Logging a run shows a placeholder, then an AI recap with Insights and Suggestions in the daily-note slot
+- [x] The recap is owner-scoped and grounds its claims in the run's logged numbers and note
+- [x] Editing the logged run regenerates the recap (`runUpdatedAt` staleness); re-renders don't re-bill (idempotent)
+- [x] The next morning's daily note replaces the recap; `replaceOne` leaves no stale recap fields
+- [x] Placeholder respects reduced motion; card holds at 360px and the retry control shows visible focus
+
 ## Phase 6 — Rescheduling
 
 Move runs when life gets in the way (travel weeks, etc.).
@@ -84,3 +97,29 @@ Acceptance:
 - [x] Keyboard focus visible, reduced motion respected
 - [x] Lighthouse PWA installability passes
 - [x] No layout breaks from 360px upward
+
+## Phase 8 — Strava import
+
+Fill run logs from synced Strava activities instead of retyping distance, duration, and average HR.
+
+Scope: OAuth 2.0 connect/disconnect in Settings (`activity:read_all` scope). Owner-scoped `stravaConnections` and `stravaActivities` collections in `lib/db.ts`. On connect, backfill the last 14 days of running activities (Run, TrailRun, VirtualRun). Pull-on-demand when the log form opens; optional daily cron to refresh tokens and sync recent activities. Map Strava summaries to `actual` (`distance` → km, `moving_time` → durationMin, `average_heartrate` → avgHr); store provenance on `actual.stravaActivityId`. On the run log form, **Import from Strava** lists unmatched activities for that session's date; tapping one pre-fills the form — the user still taps Save. Logged cards show a dim **From Strava** line when imported. Strength sessions have no Strava UI. Encrypt refresh tokens at rest; all routes auth-checked except none needed for v1 (no webhook). Document collections and mapping in `docs/ARCHITECTURE.md`. Optional `STRAVA_MOCK=1` for local dev without real OAuth.
+
+Sub-phases (one session each is fine):
+
+**S1 — Connect:** `lib/strava/oauth.ts`, `/api/strava/connect`, `/api/strava/callback`, `/api/strava/disconnect`, `/api/strava/status`, Settings toggle, token refresh, mock mode.
+
+**S2 — Ingest:** activity pull + cache, backfill on connect, `GET /api/strava/activities?date=`, optional `/api/cron/strava-sync`.
+
+**S3 — Import UI:** picker on `SessionDetail` log form, server action to link activity on save, provenance on the card.
+
+**S4 — Polish:** Today banner when a planned run has an unmatched activity for today; empty and error states; 360px and focus pass.
+
+Acceptance:
+- [ ] A runner can connect and disconnect Strava from Settings; connection is owner-scoped and survives refresh
+- [ ] Access tokens refresh automatically; expired or revoked tokens prompt reconnect, not a silent failure
+- [ ] Running activities from the last 14 days appear in Mongo after connect (or mock seed when `STRAVA_MOCK=1`)
+- [ ] Import from Strava on a run log form lists only unmatched activities for that session's date, most recent first
+- [ ] Selecting an activity pre-fills km, duration, and avg HR; Save marks the session done and sets `actual.stravaActivityId`
+- [ ] An activity cannot be linked to two sessions; manual edits to imported fields clear provenance
+- [ ] The logged card shows **From Strava** when provenance is set; dashboard stats reflect imported values
+- [ ] Strength sessions and disconnected users see no Strava UI; layout holds at 360px

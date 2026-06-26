@@ -160,13 +160,17 @@ export async function getDailySummary(
     .findOne({ ownerEmail: owner, date }, NO_ID);
 }
 
+// replaceOne (not $set) so each write fully replaces the doc for that date.
+// Daily notes and recaps share the (owner, date) key but carry different
+// fields; a full replace clears a prior recap's insights/suggestions/
+// runUpdatedAt when the morning note overwrites it, and vice versa.
 export async function upsertDailySummary(summary: DailySummary): Promise<void> {
   const db = await getDb();
   await db
     .collection<DailySummary>("dailySummaries")
-    .updateOne(
+    .replaceOne(
       { ownerEmail: summary.ownerEmail, date: summary.date },
-      { $set: summary },
+      summary,
       { upsert: true }
     );
 }

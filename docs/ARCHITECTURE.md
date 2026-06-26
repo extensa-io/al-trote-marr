@@ -86,6 +86,12 @@ An opt-in 7:00 AM `America/Toronto` notification with the day's session and a on
 
 Delivery is a Vercel Cron job (`vercel.json`) that hits `/api/cron/daily-notify` hourly. That route is the one machine-to-machine exception to the `auth()` rule: it has no session, so it is gated by a `CRON_SECRET` bearer token instead. It sends only on the run where the Toronto local hour equals `NOTIFY_HOUR` (default 7), which keeps delivery at 7 AM exactly across DST. For each owner with a subscription it builds the message from that owner's own sessions and profile (`lib/notify.ts`), sends with `web-push` (`lib/push.ts`), and prunes any endpoint returning 404/410. VAPID keys live in env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, plus `NEXT_PUBLIC_VAPID_PUBLIC_KEY` for the client).
 
+## Home-screen note and recap (AI)
+
+The slot below "Next Session" on the home page holds one AI-written card per day, stored in a fourth owner-scoped collection, `dailySummaries`, keyed by `{ ownerEmail, date }`. A doc carries a `kind`: a `daily` progress note or a run `recap`. Both are generated with the Anthropic SDK (`claude-opus-4-8`, adaptive thinking) and never accept a client-supplied owner.
+
+The `daily` note is the morning retrospective written by the cron (`generateAndStoreSummary` in `lib/summary.ts`), idempotent per date. The `recap` replaces it the moment a run is logged: when the home page renders and today's run is `done` but no recap matches the run's `updatedAt`, it mounts a small client component (`RecapGenerator`) that calls the `generateRecap` server action (`app/actions/recap.ts` → `generateAndStoreRecap` in `lib/recap.ts`), shows a "Writing recap…" placeholder, and the action's `revalidatePath("/")` swaps in the finished card (`RunRecap`). The recap holds `text` plus `insights[]` and `suggestions[]`, returned by the model as strict JSON. Editing the run bumps `updatedAt`, which makes the stored recap stale and triggers a fresh one; the next morning's cron note overwrites the day's doc. Because both shapes share the `(ownerEmail, date)` key, `upsertDailySummary` uses `replaceOne` so each write fully clears the other shape's fields.
+
 ## Out of scope (for now)
 - Offline support and background sync.
 - Garmin or Strava import. The schema leaves room (`actual` could later be auto-filled from a pulled activity), but no integration is built.

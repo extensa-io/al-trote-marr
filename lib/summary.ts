@@ -182,6 +182,7 @@ export async function generateAndStoreSummary(
   await upsertDailySummary({
     ownerEmail: owner,
     date: today,
+    kind: "daily",
     text,
     model: SUMMARY_MODEL,
     createdAt: new Date().toISOString(),

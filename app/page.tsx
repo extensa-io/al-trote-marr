@@ -15,6 +15,8 @@ import NextSession from "@/app/_components/NextSession";
 import PageHeader from "@/app/_components/PageHeader";
 import InstallHint from "@/app/_components/InstallHint";
 import DailySummary from "@/app/_components/DailySummary";
+import RunRecap from "@/app/_components/RunRecap";
+import RecapGenerator from "@/app/_components/RecapGenerator";
 
 export default async function Home() {
   const session = await auth();
@@ -31,6 +33,22 @@ export default async function Home() {
   ]);
   const runs = all.filter((s) => s.type !== "Strength");
   const done = runs.filter((s) => s.status === "done").length;
+
+  // The slot below "Next Session" shows, in priority order: a fresh recap for a
+  // run logged today (generating it first if needed), otherwise today's daily
+  // progress note. A recap is fresh only when it matches the logged run's
+  // updatedAt, so editing the run regenerates it.
+  const todayRun = todaySession && todaySession.type !== "Strength" ? todaySession : null;
+  const recapFresh =
+    summary?.kind === "recap" && summary.runUpdatedAt === todayRun?.updatedAt;
+  const recapSlot =
+    todayRun?.status === "done" && !recapFresh ? (
+      <RecapGenerator date={today} />
+    ) : summary?.kind === "recap" ? (
+      <RunRecap entry={summary} isRace={todayRun?.type === "Race"} />
+    ) : summary ? (
+      <DailySummary summary={summary} />
+    ) : null;
 
   return (
     <main className="max-w-md mx-auto px-5 py-8">
@@ -74,11 +92,7 @@ export default async function Home() {
             <NextSession session={nextSession} fromDate={today} />
           </div>
 
-          {summary && (
-            <div className="mt-6">
-              <DailySummary summary={summary} />
-            </div>
-          )}
+          {recapSlot && <div className="mt-6">{recapSlot}</div>}
 
           <div className="mt-6">
             <InstallHint />
