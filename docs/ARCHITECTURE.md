@@ -23,10 +23,12 @@ One document per training session.
 | zone | string | target HR zone label, e.g. "Z2", "Z3", "Z2-Z3" |
 | plannedKm | number | estimate for time-based runs, exact for long runs |
 | status | "planned" \| "done" \| "skipped" | |
-| actual | object \| absent | `{ km, avgHr, durationMin, notes }` |
+| actual | object \| absent | `{ km, avgHr, durationMin, weightKg, notes }`; `weightKg` is optional body weight in kg, `durationMin` doubles as time spent on Strength |
 | updatedAt | string | ISO timestamp |
 
 Unique index: `{ ownerEmail: 1, date: 1 }`.
+
+Rescheduling a run changes only its `date` and recomputed `day`; `week` is preserved so plan-week stats stay stable. Only `planned`/`skipped` runs move (never `done`, never `Strength`). Moving onto an empty date is a plain update; onto another movable run it offers a date swap; onto a `done` run or `Strength` it is blocked. Multi-document moves (swap, week-shift) go through a temp-date two-phase transaction in `lib/db.ts` (`moveSessions`) to respect the unique index atomically.
 
 ### profile
 One document per runner.
@@ -75,6 +77,7 @@ Compute these from the owner's sessions and profile. "Due" means `date <= today`
 - **longRunProgression**: sessions where `type` is "Long" or "Race", planned versus actual km by week.
 - **zoneAdherence** (aerobic discipline): among logged easy-type runs (type Easy, Long, Kickoff, or Shakeout) with `actual.avgHr` present, the share where `actual.avgHr <= zones.find(z => z.z === 2).max`. This measures staying aerobic on easy days.
 - **aerobicEfficiency** (fitness trend): for each logged easy-type run with km, durationMin, and avgHr, `efficiency = (actual.km * 1000 / (actual.durationMin * 60)) / actual.avgHr` in metres per second per beat. Plot by date; a rising trend means the aerobic engine is improving. Needs several data points before it reads meaningfully.
+- **weightTrend**: logged sessions (run or strength) with `actual.weightKg`, ordered by date, plotted as a line in kg. Needs at least two points to render a trend.
 - **estimatedFinish** (optional, phase 3 stretch): a rough projection from the most recent logged Quality or goal-pace session pace, scaled to 21.1 km, shown only once at least one such run is logged and clearly labelled an estimate. Do not over-engineer; segment-level splits are out of scope.
 
 ## Daily reminder (web push)

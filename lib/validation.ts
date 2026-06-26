@@ -6,6 +6,7 @@ export interface ActualInput {
   km?: unknown;
   avgHr?: unknown;
   durationMin?: unknown;
+  weightKg?: unknown;
   notes?: unknown;
 }
 
@@ -16,6 +17,8 @@ export type ValidationResult<T> =
 const NOTES_MAX = 500;
 const HR_MIN = 30;
 const HR_MAX = 230;
+const WEIGHT_MIN = 30;
+const WEIGHT_MAX = 300;
 
 function asFiniteNumber(input: unknown): number | null {
   if (typeof input === "number" && Number.isFinite(input)) return input;
@@ -53,6 +56,13 @@ export function validateActual(input: ActualInput): ValidationResult<Actual> {
     if (durationMin == null || durationMin <= 0)
       return { ok: false, error: "durationMin must be a positive number" };
     out.durationMin = durationMin;
+  }
+
+  if (input.weightKg !== undefined && input.weightKg !== null && input.weightKg !== "") {
+    const weightKg = asFiniteNumber(input.weightKg);
+    if (weightKg == null || weightKg < WEIGHT_MIN || weightKg > WEIGHT_MAX)
+      return { ok: false, error: `weightKg must be between ${WEIGHT_MIN} and ${WEIGHT_MAX}` };
+    out.weightKg = weightKg;
   }
 
   if (input.notes !== undefined && input.notes !== null && input.notes !== "") {

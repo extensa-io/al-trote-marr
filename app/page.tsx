@@ -8,6 +8,7 @@ import {
   listSessions,
 } from "@/lib/db";
 import { daysBetween, todayStr } from "@/lib/date";
+import { hrTargetForZone } from "@/lib/prescription";
 import SessionDetail from "@/app/_components/SessionDetail";
 import StrengthDetail from "@/app/_components/StrengthDetail";
 import NextSession from "@/app/_components/NextSession";
@@ -58,7 +59,10 @@ export default async function Home() {
             todaySession.type === "Strength" ? (
               <StrengthDetail session={todaySession} />
             ) : (
-              <SessionDetail session={todaySession} />
+              <SessionDetail
+                session={todaySession}
+                hrTarget={hrTargetForZone(todaySession.zone, profile.zones)}
+              />
             )
           ) : (
             <section className="border border-line rounded-md p-5 text-canvas-dim text-sm">

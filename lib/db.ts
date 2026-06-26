@@ -1,4 +1,6 @@
-import { getDb } from "./mongodb";
+import { randomUUID } from "crypto";
+import { getClient, getDb } from "./mongodb";
+import { weekdayShort } from "./date";
 import type {
   Profile,
   Session,
@@ -52,6 +54,53 @@ export async function updateSession(
     .collection<Session>("sessions")
     .updateOne({ ownerEmail: owner, date }, { $set: set });
   return getSession(owner, date);
+}
+
+export async function getSessionsInWeek(owner: string, week: number): Promise<Session[]> {
+  const db = await getDb();
+  return db
+    .collection<Session>("sessions")
+    .find({ ownerEmail: owner, week }, NO_ID)
+    .sort({ date: 1 })
+    .toArray();
+}
+
+// Move one or more sessions to new dates atomically. The { ownerEmail, date }
+// unique index forbids two docs sharing a date mid-write, so each moving doc is
+// first parked on a unique temp date, then written to its final date. Wrapped in
+// a transaction so a partial failure rolls back. Recomputes `day`, keeps `week`.
+export async function moveSessions(
+  owner: string,
+  moves: { from: string; to: string }[]
+): Promise<void> {
+  if (moves.length === 0) return;
+  const db = await getDb();
+  const client = await getClient();
+  const coll = db.collection<Session>("sessions");
+  const now = new Date().toISOString();
+  const staged = moves.map((m) => ({ ...m, temp: `__tmp__${m.from}__${randomUUID()}` }));
+
+  const session = client.startSession();
+  try {
+    await session.withTransaction(async () => {
+      for (const m of staged) {
+        await coll.updateOne(
+          { ownerEmail: owner, date: m.from },
+          { $set: { date: m.temp } },
+          { session }
+        );
+      }
+      for (const m of staged) {
+        await coll.updateOne(
+          { ownerEmail: owner, date: m.temp },
+          { $set: { date: m.to, day: weekdayShort(m.to), updatedAt: now } },
+          { session }
+        );
+      }
+    });
+  } finally {
+    await session.endSession();
+  }
 }
 
 // --- Push subscriptions ---

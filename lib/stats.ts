@@ -55,6 +55,11 @@ export interface EfficiencyPoint {
   efficiency: number;
 }
 
+export interface WeightPoint {
+  date: string;
+  weightKg: number;
+}
+
 export interface EstimatedFinish {
   paceSecPerKm: number;
   totalSeconds: number;
@@ -183,6 +188,13 @@ export function aerobicEfficiency(sessions: Session[]): EfficiencyPoint[] {
       const metersPerSecond = (a.km! * 1000) / (a.durationMin! * 60);
       return { date: s.date, efficiency: metersPerSecond / a.avgHr! };
     });
+}
+
+export function weightTrend(sessions: Session[]): WeightPoint[] {
+  return sessions
+    .filter((s) => typeof s.actual?.weightKg === "number")
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((s) => ({ date: s.date, weightKg: s.actual!.weightKg! }));
 }
 
 export function estimatedFinish(sessions: Session[]): EstimatedFinish | null {

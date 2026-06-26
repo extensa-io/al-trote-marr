@@ -5,6 +5,7 @@ import { getProfile, listSessions } from "@/lib/db";
 import { formatDayShort, todayStr } from "@/lib/date";
 import type { Phase, Session } from "@/lib/types";
 import PageHeader from "@/app/_components/PageHeader";
+import WeekShiftControls from "@/app/_components/WeekShiftControls";
 
 const PHASES: ReadonlyArray<Phase> = ["Base", "Build", "Peak", "Taper"];
 
@@ -87,12 +88,20 @@ export default async function PlanPage({ searchParams }: PageProps) {
           return (
             <div key={week} id={`week-${week}`} className="scroll-mt-6">
               {showBand ? <PhaseBand phase={currentPhase} /> : null}
-              <h2
-                className={`eyebrow mb-2 ${isCurrent ? "text-brass" : ""}`}
-                aria-current={isCurrent ? "true" : undefined}
-              >
-                Week {week}
-              </h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2
+                  className={`eyebrow ${isCurrent ? "text-brass" : ""}`}
+                  aria-current={isCurrent ? "true" : undefined}
+                >
+                  Week {week}
+                </h2>
+                {sessions.some(
+                  (s) =>
+                    s.type !== "Strength" && (s.status === "planned" || s.status === "skipped"),
+                ) ? (
+                  <WeekShiftControls week={week} />
+                ) : null}
+              </div>
               <ul className="space-y-1">
                 {sessions.map((s) => (
                   <li key={s.date}>

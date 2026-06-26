@@ -39,6 +39,12 @@ export function formatNiceDate(dateStr: string): string {
   }).format(date);
 }
 
+export function weekdayShort(dateStr: string): string {
+  // "Mon".."Sun" for a YYYY-MM-DD calendar date, matching the seed's `day` field.
+  const date = new Date(dateStr + "T00:00:00Z");
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" }).format(date);
+}
+
 export function formatDayShort(dateStr: string): string {
   const date = new Date(dateStr + "T00:00:00Z");
   return new Intl.DateTimeFormat("en-GB", {

@@ -3,8 +3,9 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
 import SessionDetail from "@/app/_components/SessionDetail";
 import StrengthDetail from "@/app/_components/StrengthDetail";
-import { getSession } from "@/lib/db";
+import { getProfile, getSession } from "@/lib/db";
 import { formatNiceDate } from "@/lib/date";
+import { hrTargetForZone } from "@/lib/prescription";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -20,7 +21,7 @@ export default async function PlanDate({ params }: PageProps) {
   const { date } = await params;
   if (!DATE_RE.test(date)) notFound();
 
-  const target = await getSession(owner, date);
+  const [target, profile] = await Promise.all([getSession(owner, date), getProfile(owner)]);
   if (!target) notFound();
 
   return (
@@ -44,7 +45,10 @@ export default async function PlanDate({ params }: PageProps) {
       {target.type === "Strength" ? (
         <StrengthDetail session={target} />
       ) : (
-        <SessionDetail session={target} />
+        <SessionDetail
+          session={target}
+          hrTarget={profile ? hrTargetForZone(target.zone, profile.zones) : null}
+        />
       )}
     </main>
   );

@@ -1,15 +1,19 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
-import { logActual, markStatus } from "@/app/actions/sessions";
+import { logActual, markStatus, rescheduleRun } from "@/app/actions/sessions";
 import { formatMmSs, formatPace, paceSecPerKm, parseMmSs } from "@/lib/pace";
+import { formatNiceDate, shiftDays } from "@/lib/date";
+import { stridesFromTitle } from "@/lib/prescription";
+import KebabMenu from "@/app/_components/KebabMenu";
 import type { Session, Status } from "@/lib/types";
 
 interface Props {
   session: Session;
+  hrTarget?: string | null;
 }
 
-export default function SessionDetail({ session }: Props) {
+export default function SessionDetail({ session, hrTarget }: Props) {
   const [optimistic, addOptimistic] = useOptimistic<Session, Partial<Session>>(
     session,
     (current, patch) => ({ ...current, ...patch }),
@@ -21,12 +25,56 @@ export default function SessionDetail({ session }: Props) {
   const [km, setKm] = useState("");
   const [avgHr, setAvgHr] = useState("");
   const [duration, setDuration] = useState("");
+  const [weight, setWeight] = useState("");
   const [notes, setNotes] = useState("");
+
+  const [rescheduling, setRescheduling] = useState(false);
+  const [moveDate, setMoveDate] = useState("");
+
+  function openReschedule() {
+    setMoveDate(optimistic.date);
+    setError(null);
+    setEditing(false);
+    setRescheduling(true);
+  }
+
+  function runReschedule(toDate: string, swap: boolean) {
+    startTransition(async () => {
+      const result = await rescheduleRun(optimistic.date, toDate, swap ? { swap: true } : undefined);
+      if (result.ok) {
+        setRescheduling(false);
+        return;
+      }
+      if ("conflict" in result) {
+        if (result.conflict.swappable) {
+          const ok = window.confirm(
+            `${formatNiceDate(result.conflict.date)} already has a ${result.conflict.label}. Swap them?`,
+          );
+          if (ok) runReschedule(toDate, true);
+          return;
+        }
+        setError(`${formatNiceDate(result.conflict.date)} already has a ${result.conflict.label}.`);
+        return;
+      }
+      setError(result.error);
+    });
+  }
+
+  function submitReschedule(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    if (moveDate === optimistic.date) {
+      setError("Pick a different date.");
+      return;
+    }
+    runReschedule(moveDate, false);
+  }
 
   function openLog() {
     setKm("");
     setAvgHr("");
     setDuration("");
+    setWeight("");
     setNotes("");
     setError(null);
     setEditing(true);
@@ -38,6 +86,7 @@ export default function SessionDetail({ session }: Props) {
     setDuration(
       optimistic.actual?.durationMin != null ? formatMmSs(optimistic.actual.durationMin) : "",
     );
+    setWeight(optimistic.actual?.weightKg?.toString() ?? "");
     setNotes(optimistic.actual?.notes ?? "");
     setError(null);
     setEditing(true);
@@ -81,6 +130,7 @@ export default function SessionDetail({ session }: Props) {
       km: km.trim() === "" ? undefined : Number(km),
       avgHr: avgHr.trim() === "" ? undefined : Number(avgHr),
       durationMin: parsedDuration ?? undefined,
+      weightKg: weight.trim() === "" ? undefined : Number(weight),
       notes: notes.trim() === "" ? undefined : notes.trim(),
     };
 
@@ -90,6 +140,7 @@ export default function SessionDetail({ session }: Props) {
         km: km.trim() === "" ? undefined : km,
         avgHr: avgHr.trim() === "" ? undefined : avgHr,
         durationMin: parsedDuration,
+        weightKg: weight.trim() === "" ? undefined : weight,
         notes: notes.trim() === "" ? undefined : notes.trim(),
       });
       if (!result.ok) {
@@ -111,6 +162,7 @@ export default function SessionDetail({ session }: Props) {
     actual?.km != null && actual?.durationMin != null
       ? paceSecPerKm(actual.km, actual.durationMin)
       : null;
+  const strides = stridesFromTitle(optimistic.title);
 
   return (
     <section
@@ -120,10 +172,18 @@ export default function SessionDetail({ session }: Props) {
       <div className="flex items-center justify-between mb-1">
         <span className={`font-display uppercase tracking-wider ${accentClass} text-sm`}>
           {optimistic.type} · {optimistic.zone}
+          {hrTarget ? ` · ${hrTarget}` : ""}
         </span>
         <span className="font-mono text-canvas-dim text-xs">{optimistic.day}</span>
       </div>
       <p className="text-lg leading-snug mb-3">{optimistic.title}</p>
+      {strides != null ? (
+        <p className="text-canvas-dim text-xs leading-relaxed mb-3">
+          <span className="text-canvas">{strides} strides:</span> ~20s (80–100 m) relaxed
+          accelerations to near-fast pace, with a full walk or jog recovery between. They sharpen
+          turnover without adding fatigue.
+        </p>
+      ) : null}
       <p className="font-mono text-canvas-dim text-xs mb-4">
         Planned {optimistic.plannedKm} km · Week {optimistic.week} · {optimistic.phase}
       </p>
@@ -138,6 +198,7 @@ export default function SessionDetail({ session }: Props) {
             <Row label="Duration" value={formatMmSs(actual.durationMin)} />
           )}
           {actual.avgHr != null && <Row label="Avg HR" value={`${actual.avgHr} bpm`} />}
+          {actual.weightKg != null && <Row label="Weight" value={`${actual.weightKg} kg`} />}
           {actual.notes && (
             <div className="col-span-2">
               <p className="eyebrow mb-1">Notes</p>
@@ -180,12 +241,20 @@ export default function SessionDetail({ session }: Props) {
                 placeholder="28:45 or 28.45"
               />
             </Field>
-            <Field label="" htmlFor="">
-              <span className="font-mono text-canvas-dim text-xs self-end">
-                Pace {formatPace(derivePreviewPace(km, duration))}
-              </span>
+            <Field label="Weight (kg)" htmlFor="weight">
+              <input
+                id="weight"
+                inputMode="decimal"
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                className={inputClass}
+                placeholder="72.5"
+              />
             </Field>
           </div>
+          <p className="font-mono text-canvas-dim text-xs">
+            Pace {formatPace(derivePreviewPace(km, duration))}
+          </p>
           <Field label="Notes" htmlFor="notes">
             <textarea
               id="notes"
@@ -216,36 +285,82 @@ export default function SessionDetail({ session }: Props) {
             </button>
           </div>
         </form>
+      ) : rescheduling ? (
+        <form onSubmit={submitReschedule} className="space-y-3">
+          <Field label="New date" htmlFor="moveDate">
+            <input
+              id="moveDate"
+              type="date"
+              value={moveDate}
+              onChange={(e) => setMoveDate(e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMoveDate(shiftDays(moveDate || optimistic.date, -1))}
+              disabled={pending}
+              className="px-3 py-1.5 border border-line rounded-md font-mono text-sm text-canvas-dim hover:text-canvas disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+            >
+              −1 day
+            </button>
+            <button
+              type="button"
+              onClick={() => setMoveDate(shiftDays(moveDate || optimistic.date, 1))}
+              disabled={pending}
+              className="px-3 py-1.5 border border-line rounded-md font-mono text-sm text-canvas-dim hover:text-canvas disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+            >
+              +1 day
+            </button>
+          </div>
+          {moveDate ? (
+            <p className="font-mono text-canvas-dim text-xs">Moving to {formatNiceDate(moveDate)}</p>
+          ) : null}
+          {error ? <p className="text-signal text-sm font-mono">{error}</p> : null}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={pending}
+              className="flex-1 bg-brass text-field font-display uppercase tracking-wider text-sm py-2 rounded-md disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+            >
+              {pending ? "Moving…" : "Move"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRescheduling(false);
+                setError(null);
+              }}
+              disabled={pending}
+              className="px-4 py-2 border border-line rounded-md font-display uppercase tracking-wider text-sm text-canvas-dim hover:text-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       ) : (
         <>
           {error ? <p className="text-signal text-sm font-mono mb-3">{error}</p> : null}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2">
             {status === "planned" ? (
               <>
                 <button
                   type="button"
-                  onClick={() => changeStatus("done")}
-                  disabled={pending}
-                  className="flex-1 min-w-[8rem] bg-brass text-field font-display uppercase tracking-wider text-sm py-2 rounded-md disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
-                >
-                  Mark done
-                </button>
-                <button
-                  type="button"
-                  onClick={() => changeStatus("skipped")}
-                  disabled={pending}
-                  className="px-4 py-2 border border-line rounded-md font-display uppercase tracking-wider text-sm text-canvas-dim hover:text-canvas disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
-                >
-                  Skip
-                </button>
-                <button
-                  type="button"
                   onClick={openLog}
                   disabled={pending}
-                  className="px-4 py-2 border border-line rounded-md font-display uppercase tracking-wider text-sm text-canvas-dim hover:text-canvas disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+                  className="flex-1 bg-brass text-field font-display uppercase tracking-wider text-sm py-2 rounded-md disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
                 >
-                  Log run
+                  Log
                 </button>
+                <KebabMenu
+                  disabled={pending}
+                  items={[
+                    { label: "Reschedule", onSelect: openReschedule },
+                    { label: "Mark done", onSelect: () => changeStatus("done") },
+                    { label: "Skip", onSelect: () => changeStatus("skipped"), destructive: true },
+                  ]}
+                />
               </>
             ) : (
               <>
@@ -253,18 +368,24 @@ export default function SessionDetail({ session }: Props) {
                   type="button"
                   onClick={openEdit}
                   disabled={pending}
-                  className="flex-1 min-w-[8rem] bg-brass text-field font-display uppercase tracking-wider text-sm py-2 rounded-md disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+                  className="flex-1 bg-brass text-field font-display uppercase tracking-wider text-sm py-2 rounded-md disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
                 >
-                  {status === "done" ? "Edit run" : "Log run"}
+                  {status === "done" ? "Edit" : "Log"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => changeStatus("planned")}
+                <KebabMenu
                   disabled={pending}
-                  className="px-4 py-2 border border-line rounded-md font-display uppercase tracking-wider text-sm text-canvas-dim hover:text-canvas disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
-                >
-                  Mark planned
-                </button>
+                  items={[
+                    { label: "Mark planned", onSelect: () => changeStatus("planned") },
+                    ...(status === "skipped"
+                      ? [{ label: "Reschedule", onSelect: openReschedule }]
+                      : []),
+                    {
+                      label: status === "skipped" ? "Mark done" : "Skip",
+                      onSelect: () => changeStatus(status === "skipped" ? "done" : "skipped"),
+                      destructive: status !== "skipped",
+                    },
+                  ]}
+                />
               </>
             )}
           </div>

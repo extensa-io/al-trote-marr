@@ -5,6 +5,7 @@ export interface Actual {
   km?: number;
   avgHr?: number;
   durationMin?: number;
+  weightKg?: number;
   notes?: string;
 }
 

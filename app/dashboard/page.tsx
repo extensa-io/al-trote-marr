@@ -13,6 +13,7 @@ import {
   phaseStatus,
   streak,
   weeklyVolume,
+  weightTrend,
   zoneAdherence,
 } from "@/lib/stats";
 import CountdownBlock from "@/app/_components/dashboard/CountdownBlock";
@@ -22,6 +23,7 @@ import CumulativeChart from "@/app/_components/dashboard/CumulativeChart";
 import LongRunChart from "@/app/_components/dashboard/LongRunChart";
 import ZoneAdherenceCard from "@/app/_components/dashboard/ZoneAdherenceCard";
 import AerobicEfficiencyChart from "@/app/_components/dashboard/AerobicEfficiencyChart";
+import WeightChart from "@/app/_components/dashboard/WeightChart";
 import EstimatedFinishCard from "@/app/_components/dashboard/EstimatedFinishCard";
 import PageHeader from "@/app/_components/PageHeader";
 
@@ -64,6 +66,7 @@ export default async function Dashboard() {
           <LongRunChart data={longRunProgression(sessions)} />
           <ZoneAdherenceCard data={zoneAdherence(sessions, profile)} />
           <AerobicEfficiencyChart data={aerobicEfficiency(sessions)} />
+          <WeightChart data={weightTrend(sessions)} />
           <EstimatedFinishCard data={estimatedFinish(sessions)} />
         </div>
       )}
