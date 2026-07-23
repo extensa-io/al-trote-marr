@@ -6,6 +6,7 @@ import { formatDayShort, todayStr } from "@/lib/date";
 import type { Phase, Session } from "@/lib/types";
 import PageHeader from "@/app/_components/PageHeader";
 import WeekShiftControls from "@/app/_components/WeekShiftControls";
+import ScrollToCurrentWeek from "@/app/_components/ScrollToCurrentWeek";
 
 const PHASES: ReadonlyArray<Phase> = ["Base", "Build", "Peak", "Taper"];
 
@@ -67,6 +68,8 @@ export default async function PlanPage({ searchParams }: PageProps) {
           </PhaseChip>
         ))}
       </nav>
+
+      {showJump ? <ScrollToCurrentWeek week={currentWeek} /> : null}
 
       {showJump ? (
         <div className="text-right mb-4">
