@@ -92,7 +92,17 @@ The slot below "Next Session" on the home page holds one AI-written card per day
 
 The `daily` note is the morning retrospective written by the cron (`generateAndStoreSummary` in `lib/summary.ts`), idempotent per date. The `recap` replaces it the moment a run is logged: when the home page renders and today's run is `done` but no recap matches the run's `updatedAt`, it mounts a small client component (`RecapGenerator`) that calls the `generateRecap` server action (`app/actions/recap.ts` → `generateAndStoreRecap` in `lib/recap.ts`), shows a "Writing recap…" placeholder, and the action's `revalidatePath("/")` swaps in the finished card (`RunRecap`). The recap holds `text` plus `insights[]` and `suggestions[]`, returned by the model as strict JSON. Editing the run bumps `updatedAt`, which makes the stored recap stale and triggers a fresh one; the next morning's cron note overwrites the day's doc. Because both shapes share the `(ownerEmail, date)` key, `upsertDailySummary` uses `replaceOne` so each write fully clears the other shape's fields.
 
+## Plan rebuild (AI)
+
+Plans still arrive as authored seeds, but once running a plan can drift from the runner's real fitness. The **Rebuild plan** control on `/plan` re-scales the remainder of the plan to what the runner has actually been doing, without touching history or the race.
+
+The engine lives in `lib/rebuild.ts` and follows the same shape as the recap and explanation code: assemble an owner-scoped data context, call Claude (`claude-opus-4-8`, adaptive thinking), then validate before use. The context grounds the model in the fixed race, the runner's real longest completed run, recent logged weekly volume, adherence, recent long runs, and the exact upcoming dates to rewrite. The model returns strict JSON, one workout per date.
+
+Anchors that never move: the race date, the 21.1 km race distance, the goal, the run days themselves (only the prescription on each existing date changes), the `week` numbering, and every session that is past, done, Strength, or the Race. The rebuild only rewrites run sessions dated after today that are not yet done.
+
+It is a two-step, preview-then-apply flow. `previewRebuild` generates a proposal and returns it without writing; the client shows the proposed long-run progression. `applyRebuild` re-derives the expected future dates server-side and validates the proposal against them (`coerceProposal`) before writing, so a stale or tampered proposal is rejected or reduced to the owner's own upcoming runs. AI owns the distances and prescriptions; the validator only enforces the envelope (valid JSON, full coverage of the expected dates, allowed types and phases, non-negative km). The write is a single owner-scoped `bulkWrite` in `rebuildFutureSessions` (`lib/db.ts`) whose per-doc filter also refuses any done, Strength, or Race session as a second line of defence. `previewPlanRebuild` and `applyPlanRebuild` (`app/actions/rebuild.ts`) are auth-checked like every other action and revalidate `/`, `/plan`, and `/dashboard`.
+
 ## Out of scope (for now)
 - Offline support and background sync.
 - Garmin or Strava import. The schema leaves room (`actual` could later be auto-filled from a pulled activity), but no integration is built.
-- In-app plan generation. Plans arrive as authored seeds.
+- Generating a plan from nothing. The rebuild re-scales an existing plan's upcoming sessions; it does not author a plan where none exists, change the race, or move run days.

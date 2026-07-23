@@ -98,6 +98,19 @@ Acceptance:
 - [x] Lighthouse PWA installability passes
 - [x] No layout breaks from 360px upward
 
+## Phase 9 — AI plan rebuild
+
+Re-scale the remaining plan when real fitness drifts from what was authored.
+
+Scope: a **Rebuild plan** control on `/plan` that sends the runner's profile, logged history (real longest run, recent weekly volume, adherence), and upcoming sessions to Claude, which returns a re-scaled prescription for every run dated after today. The race date, race distance, goal, run days, and all logged history stay fixed; only the upcoming runs' `type`, `title`, `zone`, `plannedKm`, and `phase` change. The control previews the proposed long-run progression first, then applies on confirm. Strength days are left untouched. AI owns the numbers; a validator owns the envelope (JSON shape, coverage of exactly the expected dates, valid types and phases). All Mongo writes go through `rebuildFutureSessions` in `lib/db.ts`.
+
+Acceptance:
+- [ ] Rebuild previews a long-run progression grounded in the runner's real longest run, then applies only on confirm
+- [ ] Only future, non-done run sessions change; the race, logged runs, past days, and strength are untouched
+- [ ] The rebuilt long run ramps sensibly (no single jump far past recent fitness) and peaks before a taper
+- [ ] A malformed or stale proposal is rejected server-side; nothing is written
+- [ ] Control is owner-scoped, auth-checked, respects reduced motion, shows visible focus, and holds at 360px
+
 ## Phase 8 — Strava import
 
 Fill run logs from synced Strava activities instead of retyping distance, duration, and average HR.

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { getClient, getDb } from "./mongodb";
 import { weekdayShort } from "./date";
 import type {
+  Phase,
   Profile,
   Session,
   Status,
@@ -102,6 +103,52 @@ export async function moveSessions(
   } finally {
     await session.endSession();
   }
+}
+
+export interface RebuildUpdate {
+  date: string;
+  type: string;
+  title: string;
+  zone: string;
+  plannedKm: number;
+  phase: Phase;
+}
+
+// Rewrite the prescription on one or more future run sessions in place. Only the
+// coaching fields change; date, day, week, status, and any actual stay put, so
+// history and the plan's week anchoring are untouched. The filter refuses to
+// write a done, Strength, or Race session as a second line of defence, so a
+// stale or tampered payload can never overwrite logged history or the fixed
+// race. Returns how many docs were actually modified.
+export async function rebuildFutureSessions(
+  owner: string,
+  updates: RebuildUpdate[]
+): Promise<number> {
+  if (updates.length === 0) return 0;
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const ops = updates.map((u) => ({
+    updateOne: {
+      filter: {
+        ownerEmail: owner,
+        date: u.date,
+        type: { $nin: ["Strength", "Race"] },
+        status: { $ne: "done" as const },
+      },
+      update: {
+        $set: {
+          type: u.type,
+          title: u.title,
+          zone: u.zone,
+          plannedKm: u.plannedKm,
+          phase: u.phase,
+          updatedAt: now,
+        },
+      },
+    },
+  }));
+  const res = await db.collection<Session>("sessions").bulkWrite(ops);
+  return res.modifiedCount;
 }
 
 // --- Push subscriptions ---

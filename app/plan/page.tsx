@@ -7,6 +7,7 @@ import type { Phase, Session } from "@/lib/types";
 import PageHeader from "@/app/_components/PageHeader";
 import WeekShiftControls from "@/app/_components/WeekShiftControls";
 import ScrollToCurrentWeek from "@/app/_components/ScrollToCurrentWeek";
+import RebuildPlanControls from "@/app/_components/RebuildPlanControls";
 
 const PHASES: ReadonlyArray<Phase> = ["Base", "Build", "Peak", "Taper"];
 
@@ -58,7 +59,11 @@ export default async function PlanPage({ searchParams }: PageProps) {
     <main className="max-w-md mx-auto px-5 py-8">
       <PageHeader title="Plan" />
 
-      <nav aria-label="Filter by phase" className="flex flex-wrap gap-2 mt-6 mb-4">
+      <div className="mt-6">
+        <RebuildPlanControls />
+      </div>
+
+      <nav aria-label="Filter by phase" className="flex flex-wrap gap-2 mb-4">
         <PhaseChip href="/plan" active={activePhase == null}>
           All
         </PhaseChip>
