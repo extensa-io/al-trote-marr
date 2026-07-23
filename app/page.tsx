@@ -12,6 +12,7 @@ import { hrTargetForZone } from "@/lib/prescription";
 import SessionDetail from "@/app/_components/SessionDetail";
 import StrengthDetail from "@/app/_components/StrengthDetail";
 import NextSession from "@/app/_components/NextSession";
+import SessionExplainer from "@/app/_components/SessionExplainer";
 import PageHeader from "@/app/_components/PageHeader";
 import InstallHint from "@/app/_components/InstallHint";
 import DailySummary from "@/app/_components/DailySummary";
@@ -86,6 +87,12 @@ export default async function Home() {
             <section className="border border-line rounded-md p-5 text-canvas-dim text-sm">
               Rest day. Nothing scheduled today.
             </section>
+          )}
+
+          {todaySession && todaySession.type !== "Strength" && (
+            <div className="mt-6">
+              <SessionExplainer owner={owner} session={todaySession} />
+            </div>
           )}
 
           <div className="mt-6">

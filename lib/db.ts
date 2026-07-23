@@ -8,6 +8,7 @@ import type {
   Actual,
   PushSubscriptionDoc,
   DailySummary,
+  SessionExplanation,
 } from "./types";
 
 const NO_ID = { projection: { _id: 0 } } as const;
@@ -171,6 +172,31 @@ export async function upsertDailySummary(summary: DailySummary): Promise<void> {
     .replaceOne(
       { ownerEmail: summary.ownerEmail, date: summary.date },
       summary,
+      { upsert: true }
+    );
+}
+
+// --- Session explanations ---
+
+export async function getSessionExplanation(
+  owner: string,
+  key: string
+): Promise<SessionExplanation | null> {
+  const db = await getDb();
+  return db
+    .collection<SessionExplanation>("sessionExplanations")
+    .findOne({ ownerEmail: owner, key }, NO_ID);
+}
+
+export async function upsertSessionExplanation(
+  explanation: SessionExplanation
+): Promise<void> {
+  const db = await getDb();
+  await db
+    .collection<SessionExplanation>("sessionExplanations")
+    .replaceOne(
+      { ownerEmail: explanation.ownerEmail, key: explanation.key },
+      explanation,
       { upsert: true }
     );
 }

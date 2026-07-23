@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { daysBetween, formatNiceDate, relativeDays } from "@/lib/date";
 import type { Session } from "@/lib/types";
 
@@ -19,7 +20,10 @@ export default function NextSession({ session, fromDate }: Props) {
   const daysAhead = daysBetween(fromDate, session.date);
 
   return (
-    <section className="border border-line bg-panel rounded-md p-4">
+    <Link
+      href={`/plan/${session.date}`}
+      className="block border border-line bg-panel rounded-md p-4 hover:border-brass focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass transition-colors"
+    >
       <div className="flex items-center justify-between mb-1">
         <p className="eyebrow">Next</p>
         <p className="font-mono text-canvas-dim text-xs">
@@ -35,6 +39,6 @@ export default function NextSession({ session, fromDate }: Props) {
           ? `~15-20 min · Week ${session.week} · ${session.phase}`
           : `Planned ${session.plannedKm} km · Week ${session.week} · ${session.phase}`}
       </p>
-    </section>
+    </Link>
   );
 }

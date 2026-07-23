@@ -61,6 +61,18 @@ export interface DailySummary {
   createdAt: string; // ISO timestamp
 }
 
+// Plain-English explanation of one workout's prescription, cached in
+// `sessionExplanations`. Keyed by (ownerEmail, key) where `key` is a hash of the
+// prescription itself (type, zone, title, plannedKm), so the many identical
+// workouts across the plan share one explanation and are generated only once.
+export interface SessionExplanation {
+  ownerEmail: string;
+  key: string; // hash of the prescription this explains
+  text: string; // the paragraph
+  model: string;
+  createdAt: string; // ISO timestamp
+}
+
 export interface Profile {
   ownerEmail: string;
   raceName: string;

@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import SessionDetail from "@/app/_components/SessionDetail";
 import StrengthDetail from "@/app/_components/StrengthDetail";
 import RunRecap from "@/app/_components/RunRecap";
+import SessionExplainer from "@/app/_components/SessionExplainer";
 import { getDailySummary, getProfile, getSession } from "@/lib/db";
 import { formatNiceDate } from "@/lib/date";
 import { hrTargetForZone } from "@/lib/prescription";
@@ -57,6 +58,12 @@ export default async function PlanDate({ params }: PageProps) {
           session={target}
           hrTarget={profile ? hrTargetForZone(target.zone, profile.zones) : null}
         />
+      )}
+
+      {target.type !== "Strength" && (
+        <div className="mt-6">
+          <SessionExplainer owner={owner} session={target} />
+        </div>
       )}
 
       {recap && (
