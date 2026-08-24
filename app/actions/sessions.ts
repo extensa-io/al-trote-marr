@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
+import { currentOwner } from "@/lib/owner";
 import {
   getSession,
   getSessionsInWeek,
@@ -42,14 +42,8 @@ function sessionLabel(s: Session): string {
   return s.type === "Strength" ? "strength session" : `${s.type} · ${s.zone}`;
 }
 
-async function requireOwner(): Promise<string | null> {
-  const session = await auth();
-  const email = session?.user?.email;
-  return email ? email.toLowerCase() : null;
-}
-
 export async function markStatus(date: string, status: string): Promise<ActionResult> {
-  const owner = await requireOwner();
+  const owner = await currentOwner();
   if (!owner) return { ok: false, error: "unauthorized" };
 
   const checked = validateStatus(status);
@@ -69,7 +63,7 @@ function revalidateAll(date: string) {
 }
 
 export async function logActual(date: string, input: ActualInput): Promise<ActionResult> {
-  const owner = await requireOwner();
+  const owner = await currentOwner();
   if (!owner) return { ok: false, error: "unauthorized" };
 
   const checked = validateActual(input);
@@ -90,7 +84,7 @@ export async function rescheduleRun(
   toDate: string,
   opts?: { swap?: boolean }
 ): Promise<RescheduleResult> {
-  const owner = await requireOwner();
+  const owner = await currentOwner();
   if (!owner) return { ok: false, error: "unauthorized" };
 
   if (!DATE_RE.test(toDate)) return { ok: false, error: "invalid date" };
@@ -127,7 +121,7 @@ export async function rescheduleRun(
 }
 
 export async function shiftWeek(week: number, deltaDays: number): Promise<ShiftResult> {
-  const owner = await requireOwner();
+  const owner = await currentOwner();
   if (!owner) return { ok: false, error: "unauthorized" };
   if (deltaDays === 0) return { ok: false, error: "nothing to shift" };
 

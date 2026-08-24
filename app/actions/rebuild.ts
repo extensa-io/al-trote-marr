@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
+import { currentOwner } from "@/lib/owner";
 import { applyRebuild, previewRebuild, type LongRunStep, type RebuildSession } from "@/lib/rebuild";
 
 export type PreviewResult =
@@ -10,17 +10,11 @@ export type PreviewResult =
 
 export type ApplyResult = { ok: true; count: number } | { ok: false; error: string };
 
-async function requireOwner(): Promise<string | null> {
-  const session = await auth();
-  const email = session?.user?.email;
-  return email ? email.toLowerCase() : null;
-}
-
 // Generate a proposed rebuild of the upcoming plan and hand it back to the
 // client for review. Nothing is written here. Errors are returned, not thrown,
 // so the control can offer a retry.
 export async function previewPlanRebuild(): Promise<PreviewResult> {
-  const owner = await requireOwner();
+  const owner = await currentOwner();
   if (!owner) return { ok: false, error: "unauthorized" };
 
   try {
@@ -44,7 +38,7 @@ export async function previewPlanRebuild(): Promise<PreviewResult> {
 // Commit a previously previewed rebuild. The proposal is re-validated
 // server-side against the owner's current upcoming runs before any write.
 export async function applyPlanRebuild(proposal: RebuildSession[]): Promise<ApplyResult> {
-  const owner = await requireOwner();
+  const owner = await currentOwner();
   if (!owner) return { ok: false, error: "unauthorized" };
 
   try {

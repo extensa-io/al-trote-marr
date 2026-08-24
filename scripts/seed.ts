@@ -1,4 +1,5 @@
 import { getDb } from "../lib/mongodb";
+import { ensureIndexes } from "../lib/indexes";
 import { OWNER, profile, sessions, strengthSessions } from "../lib/plan-seed";
 
 async function main() {
@@ -15,9 +16,7 @@ async function main() {
   await db.collection("sessions").insertMany(
     all.map((s) => ({ ...s, ownerEmail: OWNER, status: "planned" as const }))
   );
-  await db
-    .collection("sessions")
-    .createIndex({ ownerEmail: 1, date: 1 }, { unique: true });
+  await ensureIndexes(db);
 
   console.log(
     `Seeded ${sessions.length} runs + ${strengthSessions.length} strength sessions and 1 profile for ${OWNER}`

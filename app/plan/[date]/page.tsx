@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { notFound } from "next/navigation";
+import { requireOwner } from "@/lib/owner";
 import SessionDetail from "@/app/_components/SessionDetail";
 import StrengthDetail from "@/app/_components/StrengthDetail";
 import RunRecap from "@/app/_components/RunRecap";
@@ -16,9 +16,7 @@ interface PageProps {
 }
 
 export default async function PlanDate({ params }: PageProps) {
-  const session = await auth();
-  if (!session?.user?.email) redirect("/signin");
-  const owner = session.user.email.toLowerCase();
+  const owner = await requireOwner();
 
   const { date } = await params;
   if (!DATE_RE.test(date)) notFound();

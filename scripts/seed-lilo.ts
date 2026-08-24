@@ -1,4 +1,5 @@
 import { getDb } from "../lib/mongodb";
+import { ensureIndexes } from "../lib/indexes";
 import {
   LILO_OWNER,
   liloProfile,
@@ -19,9 +20,7 @@ async function main() {
     .collection("profile")
     .updateOne({ ownerEmail: LILO_OWNER }, { $set: liloProfile }, { upsert: true });
 
-  await db
-    .collection("sessions")
-    .createIndex({ ownerEmail: 1, date: 1 }, { unique: true });
+  await ensureIndexes(db);
 
   const upcoming = [...liloSessions, ...liloStrengthSessions].filter((s) => s.date >= today);
 

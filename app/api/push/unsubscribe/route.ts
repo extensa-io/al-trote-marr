@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { currentOwner, unauthorized } from "@/lib/owner";
 import { deletePushSubscription } from "@/lib/db";
 
 interface Body {
@@ -6,9 +6,8 @@ interface Body {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  const owner = session?.user?.email?.toLowerCase();
-  if (!owner) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const owner = await currentOwner();
+  if (!owner) return unauthorized();
 
   const body = (await req.json().catch(() => null)) as Body | null;
   if (!body?.endpoint) {

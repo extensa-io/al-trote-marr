@@ -53,6 +53,8 @@ The client/server split is deliberate: everything that reads is a server compone
 | `auth.ts` | Auth.js v5 config: Google provider, JWT sessions, allowlist gate in the `signIn` callback. Exports `handlers`, `auth`, `signIn`, `signOut`. |
 | `lib/mongodb.ts` | Cached `MongoClient` promise on `globalThis`. Lazy connect, never at module scope. Poisoned-promise eviction on failure. |
 | `lib/db.ts` | **The only place Mongo queries live.** Every function takes `owner` as its first argument and scopes the filter by `ownerEmail`. |
+| `lib/owner.ts` | **The only definition of the tenant key.** `currentOwner()` for route handlers and actions, `requireOwner()` (redirects) for server components, `unauthorized()` for the standard 401. |
+| `lib/indexes.ts` | Every index the app relies on, declared once. Applied by `npm run ensure-indexes`, never from a request path. |
 | `lib/types.ts` | All persisted document interfaces plus `Phase`/`Status` unions. |
 | `lib/date.ts` | `YYYY-MM-DD` string calendar math, all `America/Toronto` / UTC-pinned. |
 | `lib/validation.ts` | Input coercion and range checks for `status` and `actual`. Returns a `ValidationResult<T>` discriminated union, never throws. |
@@ -76,7 +78,7 @@ The client/server split is deliberate: everything that reads is a server compone
 
 - **Web**: `app/layout.tsx` → the five routes above.
 - **Cron**: `GET /api/cron/daily-notify`, scheduled by `vercel.json` at `0 9 * * *` (09:00 UTC, once daily). This is the only scheduled job.
-- **CLI**: `npm run seed`, `npm run seed-lilo`, `npm run add-strength`.
+- **CLI**: `npm run ensure-indexes`, `npm run seed`, `npm run seed-lilo`, `npm run add-strength`.
 - **Service worker**: `public/sw.js`, registered on demand by `DailyReminderToggle`, never by the app shell.
 
 ### Architectural decisions worth preserving
@@ -130,7 +132,7 @@ No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$s
 
 ### `pushSubscriptions`
 
-`{ ownerEmail, endpoint, keys: { p256dh, auth }, createdAt }`. **Index:** `{ endpoint: 1 }` unique, created lazily inside `savePushSubscription` on every call.
+`{ ownerEmail, endpoint, keys: { p256dh, auth }, createdAt }`. **Index:** `{ endpoint: 1 }` unique, declared in `lib/indexes.ts`.
 
 The endpoint is the natural key (one device = one endpoint), so upsert is keyed on `endpoint` alone with `ownerEmail` in the `$set` — re-subscribing on a device that changed owners reassigns it rather than duplicating.
 
@@ -146,15 +148,15 @@ Keyed `(ownerEmail, date)`. **Two shapes share one key**, distinguished by `kind
 | `runUpdatedAt` | absent | the session's `updatedAt` at generation time (staleness key) |
 | `model`, `createdAt` | both | both |
 
-`kind` absent means a `daily` note written before recaps existed. Writes go through `upsertDailySummary`, which uses **`replaceOne`, not `$set`**, precisely so switching shapes clears the other shape's fields.
+**Index:** `{ ownerEmail: 1, date: 1 }` unique, declared in `lib/indexes.ts`.
 
-No index is created on this collection.
+`kind` absent means a `daily` note written before recaps existed. Writes go through `upsertDailySummary`, which uses **`replaceOne`, not `$set`**, precisely so switching shapes clears the other shape's fields.
 
 ### `sessionExplanations`
 
 `{ ownerEmail, key, text, model, createdAt }`. `key` is `sha1(type|zone|title|plannedKm).slice(0,16)` from `explanationKey()`. Content-addressed on purpose: the ~15 distinct workouts across a 17-week plan generate once and are reused on every recurrence. Editing any of those four fields yields a new key and a fresh explanation; the old row is orphaned (harmless, never collected).
 
-No index is created on this collection.
+**Index:** `{ ownerEmail: 1, key: 1 }` unique, declared in `lib/indexes.ts`.
 
 ### Validation rules actually enforced
 
@@ -170,7 +172,6 @@ Everything else — `type`, `zone`, `title`, `plannedKm`, `phase`, `week`, `day`
 ### Schema inconsistencies and dead fields
 
 - `profile.vo2` and `profile.baseline` are stored and displayed on `/settings`, but feed no calculation.
-- `lib/date.ts` exports `torontoHour()`, which nothing imports. It was the DST gate for an hourly cron that no longer exists.
 - `Actual.durationMin` is overloaded: minutes-run for runs, minutes-spent for strength. Both go into the same field with different UI labels and different parsers (`parseMmSs` for runs, bare `Number()` for strength).
 - `Session.type` is an unconstrained `string` while `phase` and `status` are unions. Type-based behaviour is scattered across `Set` literals: `EASY_TYPES` in `stats.ts`, `REWRITE_TYPES` in `rebuild.ts`, `STRENGTH_TYPE` in `plan-seed.ts`, plus inline `!== "Strength"` checks in at least six files.
 
@@ -313,7 +314,9 @@ Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired
 - Reads in server components; mutations in server actions; route handlers only where a client must POST.
 
 **Auth**
-- The exact idiom, repeated verbatim: `const session = await auth(); const owner = session?.user?.email?.toLowerCase(); if (!owner) return 401`. Server actions wrap this in a local `requireOwner()` helper — which is **duplicated identically in all four action files**.
+- One helper module, `lib/owner.ts`, defines the tenant key. Route handlers and server actions call `currentOwner()`; handlers return `unauthorized()` and actions return `{ ok: false, error: "unauthorized" }`. Server components that need nothing but the owner call `requireOwner()`, which redirects to `/signin`.
+- `app/page.tsx` and `app/settings/page.tsx` still call `auth()` directly because they render the user's name; they lowercase the email themselves.
+- `/api/cron/daily-notify` is the sole handler with no session; it checks a bearer secret instead.
 
 **Types**
 - Discriminated unions for outcomes everywhere: `ValidationResult<T>`, `ActionResult`, `RescheduleResult`, `ExplainOutcome`, `PreviewOutcome`, `ApplyOutcome`, `SummaryOutcome`, `RecapOutcome`.
@@ -349,21 +352,19 @@ Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired
 
 ### Inconsistencies to resolve (not to imitate)
 
-1. **`requireOwner()` is copy-pasted four times** across `app/actions/{sessions,recap,explain,rebuild}.ts`, and the route handlers inline a fifth variant. Should be one shared helper.
-2. **Two duration-input conventions.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` accepts bare minutes via `Number()` and does its own ad-hoc validation. Same `durationMin` field, two contracts.
-3. **Two mutation paths for the same write.** `PATCH /api/sessions/[date]` and the `logActual`/`markStatus` actions both validate and call `updateSession`. The UI uses only the actions; the route handler is unused by any client in this repo.
-4. **Index creation is scattered**: `sessions` index in three scripts, `pushSubscriptions` index inside a hot write path, and no index at all on `dailySummaries` or `sessionExplanations` despite both being queried by compound key on every page load.
-5. **`inputClass`, `Field`, and `Row` are defined twice**, identically, in `SessionDetail.tsx` and `StrengthDetail.tsx`.
-6. **Two "is this a run?" idioms**: `isRunSession()` in `stats.ts` vs inline `s.type !== "Strength"` in `summary.ts`, `recap.ts`, `explain.ts`, `rebuild.ts`, `page.tsx`.
-7. **Native `window.confirm`** for destructive confirmations, inside otherwise fully designed components.
-8. **Two date-formatting locales**: `formatNiceDate` uses `en-US`, `formatDayShort` uses `en-GB`, both for short weekday+date. Different output for the same intent.
-9. **Reduced motion handled two ways**: the `useReducedMotion` hook, the `motion-reduce:` Tailwind variant (`Skeleton`), a raw `matchMedia` call (`ScrollToCurrentWeek`), and a global `@media` block in `globals.css`.
+1. **Two duration-input conventions.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` accepts bare minutes via `Number()` and does its own ad-hoc validation. Same `durationMin` field, two contracts.
+2. **Two mutation paths for the same write.** `PATCH /api/sessions/[date]` and the `logActual`/`markStatus` actions both validate and call `updateSession`. The UI uses only the actions; the route handler is unused by any client in this repo.
+3. **`inputClass`, `Field`, and `Row` are defined twice**, identically, in `SessionDetail.tsx` and `StrengthDetail.tsx`.
+4. **Two "is this a run?" idioms**: `isRunSession()` in `stats.ts` vs inline `s.type !== "Strength"` in `summary.ts`, `recap.ts`, `explain.ts`, `rebuild.ts`, `page.tsx`.
+5. **Native `window.confirm`** for destructive confirmations, inside otherwise fully designed components.
+6. **Two date-formatting locales**: `formatNiceDate` uses `en-US`, `formatDayShort` uses `en-GB`, both for short weekday+date. Different output for the same intent.
+7. **Reduced motion handled four ways**: the `useReducedMotion` hook, the `motion-reduce:` Tailwind variant (`Skeleton`), a raw `matchMedia` call (`ScrollToCurrentWeek`), and a global `@media` block in `globals.css`.
 
 ---
 
 ## 6. API / Endpoint Inventory
 
-All handlers except the cron begin with `await auth()` and return `401 {"error":"unauthorized"}` without a session email. All responses are JSON with `_id` stripped. There is no response envelope: success returns the bare resource or `{ ok: true, ... }`; failure returns `{ error: string }`.
+All handlers except the cron begin with `currentOwner()` from `lib/owner.ts` and return `unauthorized()` — `401 {"error":"unauthorized"}` — without a session email. All responses are JSON with `_id` stripped. There is no response envelope: success returns the bare resource or `{ ok: true, ... }`; failure returns `{ error: string }`.
 
 ### Internal (browser → same origin)
 
@@ -429,7 +430,7 @@ Six structural elements aren't covered by sections 1-6 and are load-bearing here
 |---|---|---|---|---|
 | Daily notify + summaries | `0 9 * * *` (UTC) — `vercel.json` | `GET /api/cron/daily-notify` | `CRON_SECRET` bearer | None. Idempotent per date, so a manual re-hit is safe: the summary short-circuits to `"exists"` and the push simply re-sends. |
 
-There are no queues, no workers, no background jobs, no retry policies. Timing is deliberately approximate: Vercel Hobby permits one cron run per day, so a single daily fire can't track DST and there is no local-hour gate. `NOTIFY_HOUR` and `torontoHour()` are leftovers from the abandoned hourly design.
+There are no queues, no workers, no background jobs, no retry policies. Timing is deliberately approximate: Vercel Hobby permits one cron run per day, so a single daily fire can't track DST and there is no local-hour gate. `NOTIFY_HOUR` is a leftover from the abandoned hourly design and is read by nothing.
 
 ### 7.3 Third-party integrations and failure behaviour
 
@@ -516,14 +517,16 @@ Root font size is `112.5%` (16px → 18px) so the whole rem-based scale moves to
 | `CRON_SECRET` | `/api/cron/daily-notify` | Bearer token; fails closed when unset |
 | `NOTIFY_HOUR` | nothing | Dead — see drift item 1 |
 
-**Local setup.** `npm install`; copy `.env.example` to `.env.local` and fill it; Google OAuth redirect URI `http://localhost:3000/api/auth/callback/google`; `npm run seed`; `npm run dev`.
+**Indexes.** Declared in `lib/indexes.ts`, applied by `npm run ensure-indexes`. Run it against every environment after a deploy that adds a collection or an index. It reports per-index outcomes and exits non-zero if any failed, so a unique index blocked by pre-existing duplicates is visible rather than silently absent.
+
+**Local setup.** `npm install`; copy `.env.example` to `.env.local` and fill it; Google OAuth redirect URI `http://localhost:3000/api/auth/callback/google`; `npm run ensure-indexes`; `npm run seed`; `npm run dev`.
 
 **Deploy.** Push to GitHub, import in Vercel, add every `.env.local` variable to the project, add the Vercel callback URL to the Google OAuth client, deploy, then run the seed once against the same Atlas database. On a phone: open the URL and Add to Home Screen / Install app.
 
 **Adding a runner.** The established procedure, as performed for Lilo:
 1. Write `lib/plan-seed-<name>.ts` exporting `<NAME>_OWNER`, a `Profile`, and a `Seed[]` of run sessions. Reuse `generateStrengthSessions(runDates)` from `lib/plan-seed.ts` rather than authoring strength days by hand.
 2. Add a `scripts/seed-<name>.ts` that upserts the profile, ensures the `{ownerEmail, date}` unique index, and inserts sessions with `$setOnInsert` filtered to `date >= todayStr()` — additive and idempotent, so it never clobbers logged history and never touches another runner's data.
-3. Add an `npm` script alongside `seed` and `seed-lilo`.
+3. Add an `npm` script alongside `seed` and `seed-lilo`. Call `ensureIndexes(db)` rather than creating indexes inline.
 4. Add the email to `ALLOWED_EMAILS` in every environment.
 
 Never make a new runner's seed destructive. `scripts/seed.ts` uses `deleteMany` and is the legacy exception, scoped to a single hardcoded `OWNER`.
@@ -540,11 +543,11 @@ Never make a new runner's seed destructive. `scripts/seed.ts` uses `deleteMany` 
 - Never accept an owner, email, or tenant identifier from a client payload, header, or query string. Derive it from `await auth()`.
 - Project `{ _id: 0 }` on every read.
 - Use the native `mongodb` driver. Never add Mongoose or any ODM. Never add the Atlas Data API.
-- New collections must have their document interface added to `lib/types.ts` before first use, and their index creation must live in one place — not inside a hot write path (fix `savePushSubscription`, don't copy it).
+- New collections must have their document interface added to `lib/types.ts` before first use, and every index they need must be declared in `lib/indexes.ts`. Never call `createIndex` from a request path or inline in a script.
 - Any write that can touch more than one document under the unique `{ownerEmail, date}` index must use the temp-date two-phase transaction pattern of `moveSessions`.
 
 **Auth**
-- Every route handler and server action calls `await auth()` and returns/reports unauthorized without a session email. The only exception is a machine-triggered cron route, which must be gated by a bearer secret that fails closed when the env var is absent.
+- Every route handler and server action derives the owner through `currentOwner()` from `lib/owner.ts` and returns/reports unauthorized without one. Server components that need only the owner use `requireOwner()`. Never re-implement the idiom locally. The only exception is a machine-triggered cron route, which must be gated by a bearer secret that fails closed when the env var is absent.
 - Dev-only endpoints check `NODE_ENV === "production"` and return 404 **before** touching auth or the database.
 
 **Dates**
@@ -595,32 +598,28 @@ Never make a new runner's seed destructive. `scripts/seed.ts` uses `deleteMany` 
 
 Ordered roughly by how much they'd bite.
 
-1. **The daily reminder fires at a time nobody intended, and the DST machinery is dead.** The original design was an hourly cron gated on `NOTIFY_HOUR` so the send landed at 7:00 AM Toronto year-round. What ships is `0 9 * * *` in `vercel.json` — once daily at 09:00 UTC, so 5:00 AM EDT and 4:00 AM EST — with no hour gate in the handler. The handler's comment explains why (Vercel Hobby allows one cron run per day). Consequences: `NOTIFY_HOUR` in `.env.example` and `torontoHour()` in `lib/date.ts` are both unreferenced, and the send time drifts an hour with DST.
+1. **The daily reminder fires at a time nobody intended, and the DST machinery is dead.** The original design was an hourly cron gated on `NOTIFY_HOUR` so the send landed at 7:00 AM Toronto year-round. What ships is `0 9 * * *` in `vercel.json` — once daily at 09:00 UTC, so 5:00 AM EDT and 4:00 AM EST — with no hour gate in the handler. The handler's comment explains why (Vercel Hobby allows one cron run per day). Consequence: `NOTIFY_HOUR` in `.env.example` is read by nothing, and the send time drifts an hour with DST.
 
 2. **The reminder time is stated three different ways.** `DailyReminderToggle` tells the user "A 5:00 AM notification", `.env.example` says `NOTIFY_HOUR=7`, and the actual fire time is 09:00 UTC (5:00 AM only during EDT). Decide the real time, then make the copy, the env template, and the schedule agree.
 
-3. **`requireOwner()` is duplicated verbatim in four action files**, and the route handlers inline a fifth copy of the same three lines. One divergent edit silently breaks tenancy in one path.
+3. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
 
-4. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
+4. **The new unique indexes are declared but may not be applied in production.** `lib/indexes.ts` now covers all five collections, but `npm run ensure-indexes` has to be run against each environment. A unique index over a collection that already holds duplicate `(ownerEmail, date)` or `(ownerEmail, key)` rows will fail; the script reports that per index and exits non-zero rather than silently skipping. Until it has been run and reported clean, assume the constraints are not in force.
 
-5. **Missing indexes on two hot collections.** `dailySummaries` is queried by `{ownerEmail, date}` on every home-page and plan-detail render, and `sessionExplanations` by `{ownerEmail, key}` on every run detail. Neither has an index and neither has a uniqueness constraint, so `replaceOne(..., {upsert:true})` can race into duplicates. `pushSubscriptions` has the opposite problem: `createIndex` runs inside `savePushSubscription` on every call.
+5. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
 
-6. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
+6. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
 
-7. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
+7. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
 
-8. **Dead or unused code:** `torontoHour()` (`lib/date.ts`), `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
+8. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
 
-9. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
+9. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
 
-10. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
+10. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
 
-11. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
+11. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
 
-12. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
+12. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
 
-13. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
-
-14. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.
-
-15. **`.gitignore` has uncommitted local modifications** (it currently also ignores `.idea` and `.assets`, and the file lacks a trailing newline). `.env.local` is correctly ignored. Minor, but the change is sitting unstaged.
+13. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.

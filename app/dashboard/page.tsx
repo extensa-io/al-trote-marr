@@ -1,5 +1,4 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { requireOwner } from "@/lib/owner";
 import { getProfile, listSessions } from "@/lib/db";
 import { todayStr } from "@/lib/date";
 import {
@@ -28,9 +27,7 @@ import EstimatedFinishCard from "@/app/_components/dashboard/EstimatedFinishCard
 import PageHeader from "@/app/_components/PageHeader";
 
 export default async function Dashboard() {
-  const session = await auth();
-  if (!session?.user?.email) redirect("/signin");
-  const owner = session.user.email.toLowerCase();
+  const owner = await requireOwner();
 
   const [profile, sessions] = await Promise.all([getProfile(owner), listSessions(owner)]);
   const today = todayStr();

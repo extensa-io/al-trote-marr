@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { currentOwner, unauthorized } from "@/lib/owner";
 import {
   listPushSubscriptions,
   listSessions,
@@ -19,9 +19,8 @@ export async function POST() {
     return Response.json({ error: "not found" }, { status: 404 });
   }
 
-  const session = await auth();
-  const owner = session?.user?.email?.toLowerCase();
-  if (!owner) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const owner = await currentOwner();
+  if (!owner) return unauthorized();
 
   const today = todayStr();
   const [subs, sessions, profile] = await Promise.all([

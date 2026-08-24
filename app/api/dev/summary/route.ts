@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { currentOwner, unauthorized } from "@/lib/owner";
 import { todayStr } from "@/lib/date";
 import { generateAndStoreSummary } from "@/lib/summary";
 
@@ -12,9 +12,8 @@ export async function POST() {
   if (process.env.NODE_ENV === "production") {
     return Response.json({ error: "not found" }, { status: 404 });
   }
-  const session = await auth();
-  const owner = session?.user?.email?.toLowerCase();
-  if (!owner) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const owner = await currentOwner();
+  if (!owner) return unauthorized();
 
   const outcome = await generateAndStoreSummary(owner, todayStr(), { force: true });
   return Response.json({ ok: true, outcome });

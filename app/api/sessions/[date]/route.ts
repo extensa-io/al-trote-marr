@@ -1,11 +1,10 @@
-import { auth } from "@/auth";
+import { currentOwner, unauthorized } from "@/lib/owner";
 import { getSession, updateSession } from "@/lib/db";
 import { validateActual, validateStatus } from "@/lib/validation";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ date: string }> }) {
-  const session = await auth();
-  const owner = session?.user?.email?.toLowerCase();
-  if (!owner) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const owner = await currentOwner();
+  if (!owner) return unauthorized();
   const { date } = await params;
   const doc = await getSession(owner, date);
   if (!doc) return Response.json({ error: "not found" }, { status: 404 });
@@ -13,9 +12,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ date: s
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ date: string }> }) {
-  const session = await auth();
-  const owner = session?.user?.email?.toLowerCase();
-  if (!owner) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const owner = await currentOwner();
+  if (!owner) return unauthorized();
   const { date } = await params;
   const body = await req.json().catch(() => ({}));
 

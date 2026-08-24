@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { requireOwner } from "@/lib/owner";
 import { getProfile, listSessions } from "@/lib/db";
 import { formatDayShort, todayStr } from "@/lib/date";
 import type { Phase, Session } from "@/lib/types";
@@ -20,9 +19,7 @@ interface PageProps {
 }
 
 export default async function PlanPage({ searchParams }: PageProps) {
-  const session = await auth();
-  if (!session?.user?.email) redirect("/signin");
-  const owner = session.user.email.toLowerCase();
+  const owner = await requireOwner();
 
   const { phase } = await searchParams;
   const activePhase = isPhase(phase) ? phase : null;

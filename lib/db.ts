@@ -159,7 +159,10 @@ export async function savePushSubscription(
 ): Promise<void> {
   const db = await getDb();
   const coll = db.collection<PushSubscriptionDoc>("pushSubscriptions");
-  await coll.createIndex({ endpoint: 1 }, { unique: true });
+  // The unique index on `endpoint` lives in lib/indexes.ts and is created by
+  // `npm run ensure-indexes`, not here: creating it per write costs a round trip
+  // on every subscribe. The endpoint is the natural key, so re-subscribing on a
+  // device that changed owners reassigns it rather than duplicating.
   await coll.updateOne(
     { endpoint: sub.endpoint },
     {
