@@ -517,7 +517,7 @@ Root font size is `112.5%` (16px → 18px) so the whole rem-based scale moves to
 | `CRON_SECRET` | `/api/cron/daily-notify` | Bearer token; fails closed when unset |
 | `NOTIFY_HOUR` | nothing | Dead — see drift item 1 |
 
-**Indexes.** Declared in `lib/indexes.ts`, applied by `npm run ensure-indexes`. Run it against every environment after a deploy that adds a collection or an index. It reports per-index outcomes and exits non-zero if any failed, so a unique index blocked by pre-existing duplicates is visible rather than silently absent.
+**Indexes.** Declared in `lib/indexes.ts`, applied by `npm run ensure-indexes`. Run it against every environment after a deploy that adds a collection or an index. It reports per-index outcomes and exits non-zero if any failed, so a unique index blocked by pre-existing duplicates is visible rather than silently absent. All five indexes were verified in place against production on 2026-08-24.
 
 **Local setup.** `npm install`; copy `.env.example` to `.env.local` and fill it; Google OAuth redirect URI `http://localhost:3000/api/auth/callback/google`; `npm run ensure-indexes`; `npm run seed`; `npm run dev`.
 
@@ -604,22 +604,20 @@ Ordered roughly by how much they'd bite.
 
 3. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
 
-4. **The new unique indexes are declared but may not be applied in production.** `lib/indexes.ts` now covers all five collections, but `npm run ensure-indexes` has to be run against each environment. A unique index over a collection that already holds duplicate `(ownerEmail, date)` or `(ownerEmail, key)` rows will fail; the script reports that per index and exits non-zero rather than silently skipping. Until it has been run and reported clean, assume the constraints are not in force.
+4. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
 
-5. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
+5. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
 
-6. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
+6. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
 
-7. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
+7. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
 
-8. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
+8. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
 
-9. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
+9. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
 
-10. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
+10. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
 
-11. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
+11. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
 
-12. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
-
-13. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.
+12. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.

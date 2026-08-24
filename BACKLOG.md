@@ -50,5 +50,4 @@ These are judgement calls, not bugs. Listed here so they don't get lost in the d
 
 - Fix the daily reminder time end to end (drift 1 and 2): pick the real send time, then align `vercel.json`, the Settings copy, and `.env.example`, and drop `NOTIFY_HOUR` if the single daily cron stays.
 - Decide whether `PATCH /api/sessions/[date]` and the read API are a supported surface or dead weight (drift 3).
-- Run `npm run ensure-indexes` against production and confirm every unique index lands; duplicates must be cleaned up if any fail (drift 4).
 - Add tests for the pure modules: `lib/stats.ts`, `lib/pace.ts`, `lib/date.ts`, `lib/validation.ts`, and `coerceProposal`. They were factored to be testable and never were.
