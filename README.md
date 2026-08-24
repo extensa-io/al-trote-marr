@@ -2,18 +2,11 @@
 
 A personal, multi-tenant running training tracker. Next.js 16 on Vercel, MongoDB Atlas via the native driver, Google sign-in restricted to an allowlist, installable as a PWA.
 
-This is the **foundation**: data layer, seed, auth, API, and a home screen that shows today's session. The logging loop, the calendar, and the dashboard are built next in Claude Code.
+Today's session and one-tap logging, a week-by-week plan, a stats dashboard, AI workout explanations and run recaps, an AI plan rebuild, and an opt-in daily push reminder.
 
-## Continue in Claude Code
+## Working on this repo
 
-Open this repo in Claude Code and start with the kickoff prompt in `docs/PROMPTS.md`. The agent should read these first, in order:
-
-1. `CLAUDE.md` — stack, hard rules, conventions, file map
-2. `docs/ARCHITECTURE.md` — data model, API, and exact stat formulas
-3. `docs/DESIGN.md` — palette and type tokens, UI principles
-4. `docs/ROADMAP.md` — phased build plan with acceptance criteria
-
-Build one roadmap phase per session.
+**`CONTEXT.md` is the authoritative reference** — architecture, data model, business rules, conventions, design system, and the rules every change must follow. Read it before writing code. `CLAUDE.md` is the short operating brief for agents; `BACKLOG.md` holds scope that isn't built yet.
 
 ## Stack
 

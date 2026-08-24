@@ -1,0 +1,626 @@
+# CONTEXT.md — Al Trote Marr!
+
+**This file is the single authoritative reference for how this app works and how it must be built going forward.** It is a rulebook, not a description. Code that contradicts it is drift and must be flagged, not copied. `CLAUDE.md` is the short operating brief for agents and must agree with this file; where they diverge, this file wins.
+
+Everything below was derived by reading the implementation. It supersedes the former `docs/` folder (`ARCHITECTURE.md`, `DESIGN.md`, `ROADMAP.md`, `PROMPTS.md`) entirely — the durable content from those files now lives here: the data model and stat formulas in sections 3-4, the design system in 7.5, setup and runner-onboarding procedures in 7.6. Forward-looking scope that has no code yet lives in `BACKLOG.md`. Do not resurrect `docs/` or cite it as a source.
+
+---
+
+## 1. App Goals & Non-Goals
+
+### What it is
+
+A personal, multi-tenant half-marathon training tracker for a tiny fixed set of runners (currently two: `nestor.daza@gmail.com` and `lilo.ayala@gmail.com`, per `lib/allowlist.ts` and `.env.example`). Each runner has one authored 17-week plan seeded into MongoDB, sees the day's prescribed session, logs what they actually did, and gets stats, charts, AI coaching prose, and a daily push reminder.
+
+The problem it solves: replacing a spreadsheet training plan with a phone-first app that (a) shows only what matters today, (b) captures a run in a handful of taps, (c) computes adherence and aerobic-fitness trends from the logged data, and (d) uses an LLM to explain prescriptions, recap runs, and re-scale the plan when authored volume outruns real fitness.
+
+### Users
+
+Allowlisted Google accounts only. There is no signup, no invite flow, no role model, no admin. Adding a runner means editing `ALLOWED_EMAILS` and writing a new seed module (see `lib/plan-seed-lilo.ts` and `scripts/seed-lilo.ts` for the established pattern).
+
+### Non-goals (all evidenced in code)
+
+- **No offline support, no caching service worker.** `public/sw.js` handles only `push` and `notificationclick`; it has no `fetch` handler and never touches `caches`. This is stated as a hard rule in `CLAUDE.md` and enforced by the file itself.
+- **No ODM.** MongoDB native driver only (`lib/mongodb.ts`, `lib/db.ts`). No Mongoose anywhere; no Atlas Data API.
+- **No self-service onboarding or plan authoring from scratch.** Plans arrive as TypeScript seed modules run by a script. The AI rebuild only re-scales existing future sessions; it cannot create sessions, move run days, or change the race.
+- **No server-side schema validation in MongoDB.** No JSON Schema validators, no migrations directory. Shape is enforced only by TypeScript and `lib/validation.ts`.
+- **No test suite.** There is no test runner, no test files, no test script in `package.json`. Correctness is enforced by `tsc` (strict), ESLint, and manual review per roadmap phase.
+- **No Strava / Garmin import.** Specced in `BACKLOG.md`, zero code exists. `actual` has no provenance field yet.
+- **No user-editable profile.** `GET /api/profile` is read-only; profiles are written by seed scripts only.
+- **No pagination, search, or sharing between runners.** Every read loads the owner's whole plan (~50-140 docs) and filters in memory.
+- **No i18n.** All UI copy is English, despite the Spanish app name.
+
+---
+
+## 2. Architecture & Module Map
+
+### Shape
+
+A single Next.js 16 App Router monolith deployed on Vercel. There is no separate API service, no queue, no cache layer, no worker process. Data access is a thin owner-scoped repository module over the native MongoDB driver.
+
+Three ways code runs:
+
+1. **Server Components** — the default. Pages call `auth()`, then read through `lib/db.ts` directly. This is the preferred path; route handlers exist only where a client needs to POST.
+2. **Server Actions** (`app/actions/*.ts`) — all mutations initiated from the UI.
+3. **Route handlers** (`app/api/**`) — the JSON API, the push subscribe/unsubscribe endpoints (called by `fetch` from a client component), the Vercel cron entry point, and two dev-only endpoints.
+
+The client/server split is deliberate: everything that reads is a server component; everything interactive is a `"use client"` leaf that calls a server action and relies on `revalidatePath` to re-render the server tree.
+
+### Directory map
+
+| Path | Responsibility |
+|---|---|
+| `auth.ts` | Auth.js v5 config: Google provider, JWT sessions, allowlist gate in the `signIn` callback. Exports `handlers`, `auth`, `signIn`, `signOut`. |
+| `lib/mongodb.ts` | Cached `MongoClient` promise on `globalThis`. Lazy connect, never at module scope. Poisoned-promise eviction on failure. |
+| `lib/db.ts` | **The only place Mongo queries live.** Every function takes `owner` as its first argument and scopes the filter by `ownerEmail`. |
+| `lib/types.ts` | All persisted document interfaces plus `Phase`/`Status` unions. |
+| `lib/date.ts` | `YYYY-MM-DD` string calendar math, all `America/Toronto` / UTC-pinned. |
+| `lib/validation.ts` | Input coercion and range checks for `status` and `actual`. Returns a `ValidationResult<T>` discriminated union, never throws. |
+| `lib/pace.ts` | Pace parsing (`mm:ss` and mobile-keypad variants) and formatting. Pace is always derived, never stored. |
+| `lib/prescription.ts` | Parses prescription strings/labels: zone label → bpm range, strides count from a title. |
+| `lib/stats.ts` | Every dashboard formula as a pure function over `Session[]` + `Profile`. No I/O, no React. |
+| `lib/notify.ts` | Builds the push notification `{title, body}` from stats. Pure. |
+| `lib/push.ts` | `server-only`. VAPID configuration and `web-push` send, with expired-endpoint detection. |
+| `lib/summary.ts` / `lib/recap.ts` / `lib/explain.ts` / `lib/rebuild.ts` | The four AI features. Each follows the same three-layer shape: `buildXPrompt` (pure), `generateX` (Anthropic call), `generateAndStoreX` / `getOrCreateX` (owner-scoped orchestration + persistence). |
+| `lib/plan-seed.ts` | Néstor's plan: profile, run sessions, and a generated strength schedule. Exports `generateStrengthSessions` for reuse. |
+| `lib/plan-seed-lilo.ts` | Lilo's plan, reusing `generateStrengthSessions` from the primary seed. |
+| `lib/useReducedMotion.ts` | `useSyncExternalStore` hook over `prefers-reduced-motion`. |
+| `app/page.tsx`, `app/plan/**`, `app/dashboard`, `app/settings`, `app/signin` | The five screens. Each is an async server component that redirects to `/signin` without a session. |
+| `app/_components/**` | Shared UI. `dashboard/` holds the Recharts cards and `chart-theme.ts`. |
+| `app/actions/**` | Server actions: `sessions.ts` (log/status/reschedule/shift), `recap.ts`, `explain.ts`, `rebuild.ts`. |
+| `app/api/**` | Route handlers. |
+| `scripts/*.ts` | One-shot Node scripts run via `tsx` with `--env-file=.env.local`. |
+| `CONTEXT.md` / `BACKLOG.md` | The rulebook and the unbuilt-scope list. There is no `docs/` folder; it was superseded by these two. |
+
+### Entry points
+
+- **Web**: `app/layout.tsx` → the five routes above.
+- **Cron**: `GET /api/cron/daily-notify`, scheduled by `vercel.json` at `0 9 * * *` (09:00 UTC, once daily). This is the only scheduled job.
+- **CLI**: `npm run seed`, `npm run seed-lilo`, `npm run add-strength`.
+- **Service worker**: `public/sw.js`, registered on demand by `DailyReminderToggle`, never by the app shell.
+
+### Architectural decisions worth preserving
+
+- **Lazy Mongo connect** (`lib/mongodb.ts`): connecting at module scope on serverless caused requests that never query to freeze mid-handshake and leak unawaited rejections. Connect inside the accessor, 5s server-selection and connect timeouts, and evict the cached promise on rejection so a poisoned slot doesn't outlive one failure.
+- **`ownerEmail` as the tenancy key** rather than a user table: no auth DB adapter, sessions are JWTs, and the owner is always `session.user.email.toLowerCase()`. There is no user collection to join against.
+- **Dates as `YYYY-MM-DD` strings** with lexicographic comparison. Every calendar operation pins to UTC midnight or formats through `Intl` with an explicit `timeZone`. This avoids Date-object timezone drift entirely and makes `$gt`/`$lte` on `date` correct in Mongo.
+- **AI outputs are cached documents, not live calls on render.** Summaries and recaps are keyed by `(ownerEmail, date)`; explanations are keyed by a content hash so identical workouts across 17 weeks generate once. Idempotency is the billing control.
+- **Preview-then-apply for the rebuild**, with server-side re-derivation of the expected dates. The client's proposal is never trusted; `coerceProposal` plus a restrictive `bulkWrite` filter are two independent lines of defence.
+- **Push before AI in the cron**: the function has a `maxDuration` budget and per-runner model calls have no timeout, so the time-critical notification ships first and summary generation is best-effort.
+
+---
+
+## 3. Data Models & Schemas
+
+Database: `process.env.MONGODB_DB` (default `altrotemarr`). Five collections, **all** scoped by `ownerEmail`. All reads project `_id` out (`NO_ID` in `lib/db.ts`).
+
+### `sessions`
+
+One document per training session (run or strength). Type: `Session` in `lib/types.ts`.
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `ownerEmail` | string | yes | Lowercased email. Never client-supplied. |
+| `week` | number | yes | 1..17. Preserved across reschedules. |
+| `date` | string | yes | `YYYY-MM-DD`. Unique per owner. |
+| `day` | string | yes | `Mon`..`Sun`. Recomputed by `weekdayShort()` on move. |
+| `phase` | `"Base"\|"Build"\|"Peak"\|"Taper"` | yes | |
+| `type` | string | yes | Open string. In practice: `Easy`, `Quality`, `Long`, `Kickoff`, `Shakeout`, `Race`, `Strength`. |
+| `title` | string | yes | The human prescription, e.g. `"WU, 2x8 min Z3 (3 min jog), CD"`. |
+| `zone` | string | yes | HR zone label: `"Z2"`, `"Z2-Z3"`, `""` for Strength. |
+| `plannedKm` | number | yes | `0` for Strength. |
+| `exercises` | `StrengthExercise[]` | no | Strength only. `{ name, detail }`. |
+| `status` | `"planned"\|"done"\|"skipped"` | yes | Seeded as `planned`. |
+| `actual` | `Actual` | no | `{ km?, avgHr?, durationMin?, weightKg?, notes? }`. |
+| `updatedAt` | string | no | ISO timestamp. Absent until first write. Doubles as the recap staleness key. |
+
+**Index:** `{ ownerEmail: 1, date: 1 }` unique. Created idempotently by `scripts/seed.ts`, `scripts/seed-lilo.ts`, and `scripts/add-strength.ts`.
+
+**Modelling choice:** `actual` is embedded, not referenced. There is exactly one log per session, always read with the session, never queried independently — embedding is correct and the document stays tiny. `exercises` is likewise a bounded (5-8 item) embedded array on strength days only. `zones` is embedded in `profile` for the same reason.
+
+**Denormalization:** `day`, `week`, and `phase` are all derivable from `date` plus plan constants, but are stored because every read path groups and filters on them without wanting to recompute. The cost is that `moveSessions` must recompute `day` (it does) and deliberately does *not* recompute `week` (plan-week stats must stay stable).
+
+### `profile`
+
+One document per runner. Type: `Profile`.
+
+`{ ownerEmail, raceName, raceDate (YYYY-MM-DD), goal, baseline, maxHr, vo2, goalPaceSecPerKm, zones: Zone[] }`, where `Zone` is `{ z, name, min, max }` covering Z1..Z5.
+
+No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$set}, {upsert:true})` from seed scripts only.
+
+### `pushSubscriptions`
+
+`{ ownerEmail, endpoint, keys: { p256dh, auth }, createdAt }`. **Index:** `{ endpoint: 1 }` unique, created lazily inside `savePushSubscription` on every call.
+
+The endpoint is the natural key (one device = one endpoint), so upsert is keyed on `endpoint` alone with `ownerEmail` in the `$set` — re-subscribing on a device that changed owners reassigns it rather than duplicating.
+
+### `dailySummaries`
+
+Keyed `(ownerEmail, date)`. **Two shapes share one key**, distinguished by `kind`:
+
+| Field | `kind: "daily"` | `kind: "recap"` |
+|---|---|---|
+| `text` | the morning progress note | the recap paragraph |
+| `insights[]` | absent | 2-4 short phrases |
+| `suggestions[]` | absent | 1-3 pointers |
+| `runUpdatedAt` | absent | the session's `updatedAt` at generation time (staleness key) |
+| `model`, `createdAt` | both | both |
+
+`kind` absent means a `daily` note written before recaps existed. Writes go through `upsertDailySummary`, which uses **`replaceOne`, not `$set`**, precisely so switching shapes clears the other shape's fields.
+
+No index is created on this collection.
+
+### `sessionExplanations`
+
+`{ ownerEmail, key, text, model, createdAt }`. `key` is `sha1(type|zone|title|plannedKm).slice(0,16)` from `explanationKey()`. Content-addressed on purpose: the ~15 distinct workouts across a 17-week plan generate once and are reused on every recurrence. Editing any of those four fields yields a new key and a fresh explanation; the old row is orphaned (harmless, never collected).
+
+No index is created on this collection.
+
+### Validation rules actually enforced
+
+Only in `lib/validation.ts`, applied by `PATCH /api/sessions/[date]` and by the `markStatus`/`logActual` server actions:
+
+- `status` ∈ `["planned","done","skipped"]`.
+- `km` > 0; `durationMin` > 0; `avgHr` ∈ [30, 230]; `weightKg` ∈ [30, 300]; `notes` ≤ 500 chars, trimmed.
+- Empty string / `null` / `undefined` means "field omitted", not "invalid".
+- Numeric strings are accepted and coerced (`asFiniteNumber`), because form inputs send strings.
+
+Everything else — `type`, `zone`, `title`, `plannedKm`, `phase`, `week`, `day` — is unvalidated on write except through the rebuild path, where `coerceProposal` enforces `type ∈ {Easy, Quality, Long, Shakeout}`, `phase ∈ {Base, Build, Peak, Taper}`, non-empty title, string zone, and finite `plannedKm ≥ 0`.
+
+### Schema inconsistencies and dead fields
+
+- `profile.vo2` and `profile.baseline` are stored and displayed on `/settings`, but feed no calculation.
+- `lib/date.ts` exports `torontoHour()`, which nothing imports. It was the DST gate for an hourly cron that no longer exists.
+- `Actual.durationMin` is overloaded: minutes-run for runs, minutes-spent for strength. Both go into the same field with different UI labels and different parsers (`parseMmSs` for runs, bare `Number()` for strength).
+- `Session.type` is an unconstrained `string` while `phase` and `status` are unions. Type-based behaviour is scattered across `Set` literals: `EASY_TYPES` in `stats.ts`, `REWRITE_TYPES` in `rebuild.ts`, `STRENGTH_TYPE` in `plan-seed.ts`, plus inline `!== "Strength"` checks in at least six files.
+
+---
+
+## 4. Business Rules & Workflows
+
+### Sign-in
+
+`app/signin/page.tsx` → `signIn("google", { redirectTo: "/" })` → Auth.js `signIn` callback in `auth.ts` → `isAllowed(profile.email)` against `ALLOWED_EMAILS` (lowercased, comma-split). Rejection returns `false`, which Auth.js renders as an access-denied error. Sessions are JWTs; there is no adapter and no session collection.
+
+Every protected page repeats the same three lines: `await auth()`, `redirect("/signin")` when there's no `session.user.email`, then `const owner = session.user.email.toLowerCase()`.
+
+### Logging a run
+
+1. `SessionDetail` (client) collects km, avg HR, duration, weight, notes. Duration is parsed client-side by `parseMmSs`, which accepts `28:45`, `28.45`, `28,45`, `28 45`, or `28` — mobile numeric keypads expose no colon.
+2. `useOptimistic` applies the patch immediately; `logActual(date, input)` runs in a transition.
+3. The action re-derives `owner` from the session, validates via `validateActual`, and calls `updateSession(owner, date, { status: "done", actual })`.
+4. `updateSession` always sets `updatedAt` to now, `$set`s only the provided keys, and re-reads the doc to return it.
+5. `revalidateAll(date)` revalidates `/`, `/plan`, `/plan/[date]`.
+6. On the home page's next render, today's run is `done` and no recap matches its `updatedAt`, so `RecapGenerator` mounts and fires the recap flow (below).
+
+**Rule:** re-logging or changing the status of an already-`done` session prompts a `window.confirm` first (both `SessionDetail` and `StrengthDetail`). Client-side guard only; the server permits it.
+
+### Rescheduling one run — `rescheduleRun`
+
+Rules, in the order they are checked:
+- Target date must match `/^\d{4}-\d{2}-\d{2}$/` and differ from the source.
+- Strength sessions cannot be moved individually.
+- Only `planned` or `skipped` sessions can move (`MOVABLE`). A `done` session is immovable.
+- Empty target → plain move.
+- Occupied target → return a `conflict` with `swappable = MOVABLE.has(target.status)`. The client confirms, then re-calls with `{ swap: true }`, and the two sessions exchange dates. **Runs take priority**: a planned/skipped strength session on the target day yields.
+- A `done` occupant can never be displaced.
+
+`week` is preserved; `day` is recomputed.
+
+### Shifting a whole week — `shiftWeek`
+
+Every `planned`/`skipped` session in that `week` (runs *and* strength) moves by ±1 day together. A landing date that belongs to another mover is fine. A landing date occupied by a stationary session — a logged day, or any session in an adjacent week — aborts the whole shift with an explanatory message naming the date and the blocker.
+
+### Atomic multi-document moves — `moveSessions`
+
+The unique `{ownerEmail, date}` index forbids two docs sharing a date even transiently, so moves are two-phase inside a transaction: park every mover on `__tmp__<from>__<uuid>`, then write each to its final date with a recomputed `day` and a fresh `updatedAt`. `session.endSession()` in a `finally`.
+
+### Daily cron — `GET /api/cron/daily-notify`
+
+Runs once a day at 09:00 UTC. Gated by `Authorization: Bearer ${CRON_SECRET}`; a missing `CRON_SECRET` env var fails closed (401). This is the **only** handler that does not call `auth()`.
+
+1. Load all push subscriptions (across all owners), group by `ownerEmail`.
+2. Per owner: load sessions + profile once, build the message with `buildDailyMessage`, send to each of that owner's endpoints. 404/410 → delete that endpoint and count it as pruned.
+3. VAPID misconfiguration throws from `configure()` before anything sends; that is caught and surfaced in the response body as `push.error` rather than a 500.
+4. Then, per allowlisted email, `generateAndStoreSummary(owner, today)` — idempotent per date, so a retry within the day reuses the stored note. Per-owner failures are caught and recorded as `"error"`.
+
+Response: `{ ok, date, push: { recipients, sent, pruned, error? }, summaries: Record<email, outcome> }`.
+
+**Rule:** the push must stay first. The comment in the file is load-bearing — summary generation is unbounded and can exhaust `maxDuration`.
+
+### Daily note (`kind: "daily"`)
+
+`buildSummaryPrompt` builds a plain-text data context, deliberately using `cutoff = today - 1` for every backward-looking metric: it's a morning retrospective, so counting today's un-run session as "due but not done" would drag adherence, zero the streak, and make the current week look short. Today's session is stated on its own line and drives the countdown. Returns `null` when nothing is due yet.
+
+Strength sessions are excluded from the running note entirely.
+
+### Run recap (`kind: "recap"`)
+
+Triggered by render, not by the write. `app/page.tsx` computes `recapFresh = summary.kind === "recap" && summary.runUpdatedAt === todayRun.updatedAt`. When today's run is `done` and the recap isn't fresh, it renders `RecapGenerator`, which fires `generateRecap(date)` on mount (guarded by a `useRef` against React's dev double-invoke) and shows a placeholder until `revalidatePath("/")` swaps in `RunRecap`.
+
+`generateAndStoreRecap` refuses non-runs, missing sessions, and anything not `done`. It short-circuits to `"exists"` when a stored recap's `runUpdatedAt` matches. The model returns strict JSON; `parseRecap` strips a possible code fence and falls back to treating the whole response as the recap text with empty lists.
+
+Recaps are visible on any past day's `/plan/[date]`, not just today.
+
+### Session explanation
+
+`SessionExplainer` (server) computes `explanationKey(session)` and looks it up. Hit → render the prose. Miss → render `ExplanationGenerator` (client), which fires `explainSession(date)` on mount, same placeholder-then-revalidate pattern. Strength sessions render nothing — the exercise list is already explicit.
+
+### Plan rebuild
+
+Two steps, both auth-checked server actions.
+
+`previewPlanRebuild` → `previewRebuild(owner)`: derives `futureRunSessions` = `date > today && type !== "Strength" && type !== "Race" && status !== "done"`, builds a context grounded in the fixed race, the runner's **actual longest completed run**, recent logged weekly volume, adherence, and recent long runs, then asks the model for one workout per expected date. Nothing is written. The client shows the proposed long-run ramp.
+
+`applyPlanRebuild(proposal)` → `applyRebuild(owner, proposal)`: **re-derives the expected dates server-side**, runs `coerceProposal` against them (every expected date must be present and well-formed; unknown dates are dropped; any bad field rejects the whole proposal), then `rebuildFutureSessions` issues one `bulkWrite` whose per-doc filter is `{ ownerEmail, date, type: { $nin: ["Strength","Race"] }, status: { $ne: "done" } }`.
+
+**Rule — the anchors that never move:** race date, race distance, goal, the run days themselves, `week` numbering, and every session that is past, `done`, Strength, or the Race. Only `type`, `title`, `zone`, `plannedKm`, `phase`, and `updatedAt` change.
+
+### Stat rules (`lib/stats.ts`)
+
+- Strength sessions are excluded from every running metric (`isRunSession`).
+- "Due" = `date <= today`, string comparison in `America/Toronto`.
+- `adherence*`: `done / due`; a past `skipped` counts against you.
+- `streak`: due sessions descending, count leading `done`, stop at the first non-`done`.
+- `adherence4wk`: inclusive 28-day window, `shiftDays(today, -27)`.
+- `zoneAdherence`: among `done` runs of type Easy/Long/Kickoff/Shakeout with `avgHr`, the share with `avgHr <= Z2.max`. `null` when there's no Z2 or no data.
+- `aerobicEfficiency`: `(km*1000 / (durationMin*60)) / avgHr`, m/s per bpm, same easy-type filter, needs all three fields.
+- `estimatedFinish`: latest `done` session of type `Quality` **or** whose title matches `/goal pace/i`, with km and duration; pace scaled to `21.0975` km.
+- `cumulativeKm` emits `actual: null` until the first logged run, so the chart line starts where data starts rather than at zero.
+- Every function returns `0`, `null`, or `[]` rather than dividing by zero.
+
+### Error-handling patterns
+
+- **Server actions never throw to the client.** They return `{ ok: false, error }` (or a `conflict` variant), logging the real cause with `console.error`. The rationale, repeated in comments: the client can offer a retry instead of spinning.
+- **Route handlers** return `Response.json({ error }, { status })` with lowercase messages: `401 unauthorized`, `400` validation messages, `404 not found` / `no plan`, `409` for "no subscription on this device".
+- **AI library functions throw**; their orchestrators or callers catch.
+- **Dev-only routes** (`/api/dev/*`) return 404 when `NODE_ENV === "production"` — checked before `auth()`.
+- **Pages** use `notFound()` for a bad date or missing session, and `redirect("/signin")` for no session. `app/error.tsx` shows `error.digest` when present, the raw message otherwise.
+
+---
+
+## 5. Coding Conventions & Tech Stack
+
+### Stack
+
+| | |
+|---|---|
+| Runtime | Node.js (Vercel Functions); scripts need Node 22+ for `--env-file` |
+| Framework | Next.js `^16.0.0`, App Router, React `^19` |
+| Language | TypeScript `^5.7`, `strict: true`, `noEmit`, `@/*` → repo root |
+| Database | MongoDB Atlas via `mongodb` `^6.12` (native driver only) |
+| Auth | `next-auth` `5.0.0-beta.31`, Google provider, JWT sessions |
+| Styling | Tailwind CSS v4 via `@tailwindcss/postcss`; tokens in `@theme` in `app/globals.css` |
+| Charts | `recharts` `^2.15` |
+| AI | `@anthropic-ai/sdk` `^0.105`, model `claude-opus-4-8` everywhere |
+| Push | `web-push` `^3.6` |
+| Lint | ESLint 9 flat config: `eslint-config-next` + core-web-vitals + typescript |
+| Scripts | `tsx` |
+
+Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired as CSS variables in `app/layout.tsx`.
+
+### Conventions this repo actually follows
+
+**Files and naming**
+- Components: `PascalCase.tsx`, default export, co-located under `app/_components/` (shared) or `app/<route>/_components/` (route-scoped).
+- Library modules: `kebab-or-single-word.ts` in `lib/`, named exports only.
+- Dashboard cards live in `app/_components/dashboard/` and take a single `data` prop of a type imported from `lib/stats.ts`.
+- Route-level `loading.tsx` exists for `/`, `/plan`, `/plan/[date]`, `/dashboard`, `/settings`, built from the shared `Skeleton`.
+
+**Data access**
+- Every `lib/db.ts` function signature is `(owner: string, ...)`, and every filter includes `ownerEmail: owner`. No exceptions. `listAllPushSubscriptions()` is the single unscoped read, used only by the cron.
+- Projection `{ _id: 0 }` on every read.
+- Reads in server components; mutations in server actions; route handlers only where a client must POST.
+
+**Auth**
+- The exact idiom, repeated verbatim: `const session = await auth(); const owner = session?.user?.email?.toLowerCase(); if (!owner) return 401`. Server actions wrap this in a local `requireOwner()` helper — which is **duplicated identically in all four action files**.
+
+**Types**
+- Discriminated unions for outcomes everywhere: `ValidationResult<T>`, `ActionResult`, `RescheduleResult`, `ExplainOutcome`, `PreviewOutcome`, `ApplyOutcome`, `SummaryOutcome`, `RecapOutcome`.
+- Interfaces for object shapes, `type` for unions.
+- `ReadonlyArray<T>` for module-level constant lists; `Set` for membership tests.
+- Zero `any` in the codebase. Unknown input is typed `unknown` and narrowed.
+
+**React**
+- `"use client"` only on leaves that need interaction. Client components import server actions directly.
+- `useOptimistic` + `useTransition` for mutations; local `error` state rendered in `signal` colour.
+- `useSyncExternalStore` for browser-media/storage subscriptions (`useReducedMotion`, `InstallHint`).
+- Charts take `isAnimationActive={!useReducedMotion()}`.
+- Every interactive element carries `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass`.
+
+**Styling**
+- Only the nine palette tokens from `app/globals.css`. The one duplication is `chart-theme.ts`, which mirrors the hexes because Recharts SVG can't read CSS variables — it says so in a comment.
+- `.eyebrow` for all uppercase micro-labels.
+- Mobile-first, `max-w-md mx-auto px-5 py-8` on every page main.
+- Mono font for every number.
+
+**Comments**
+- Non-obvious decisions carry a "why" comment above the function. This is a strong, consistent habit (`lib/mongodb.ts`, `moveSessions`, `rebuildFutureSessions`, `upsertDailySummary`, the cron ordering, `parseMmSs`, the summary cutoff). Preserve it.
+
+**AI feature shape** — every one of the four follows it:
+1. `export const X_MODEL = "claude-opus-4-8"`.
+2. A `SYSTEM_PROMPT` const that always ends with the same voice clause: plain, warm, coach-like, no hype, no emoji, **never military/drill/boot-camp vocabulary**, no markdown.
+3. A pure `buildXPrompt(...)` that assembles a plain-text data context and returns `string | null`.
+4. `generateX(...)`: `new Anthropic()`, `thinking: { type: "adaptive" }`, `output_config: { effort: ... }`, filter `content` to text blocks, join, trim.
+5. JSON responses go through an `unfence()` helper and a tolerant parser.
+6. `generateAndStoreX` / `getOrCreateX`: owner-scoped, idempotent, returns a string-union outcome.
+
+**Testing**: none. Formulas are deliberately isolated into small pure functions in `lib/` so they *could* be unit-tested, but no tests were ever written. Keep new formulas pure and out of components regardless.
+
+### Inconsistencies to resolve (not to imitate)
+
+1. **`requireOwner()` is copy-pasted four times** across `app/actions/{sessions,recap,explain,rebuild}.ts`, and the route handlers inline a fifth variant. Should be one shared helper.
+2. **Two duration-input conventions.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` accepts bare minutes via `Number()` and does its own ad-hoc validation. Same `durationMin` field, two contracts.
+3. **Two mutation paths for the same write.** `PATCH /api/sessions/[date]` and the `logActual`/`markStatus` actions both validate and call `updateSession`. The UI uses only the actions; the route handler is unused by any client in this repo.
+4. **Index creation is scattered**: `sessions` index in three scripts, `pushSubscriptions` index inside a hot write path, and no index at all on `dailySummaries` or `sessionExplanations` despite both being queried by compound key on every page load.
+5. **`inputClass`, `Field`, and `Row` are defined twice**, identically, in `SessionDetail.tsx` and `StrengthDetail.tsx`.
+6. **Two "is this a run?" idioms**: `isRunSession()` in `stats.ts` vs inline `s.type !== "Strength"` in `summary.ts`, `recap.ts`, `explain.ts`, `rebuild.ts`, `page.tsx`.
+7. **Native `window.confirm`** for destructive confirmations, inside otherwise fully designed components.
+8. **Two date-formatting locales**: `formatNiceDate` uses `en-US`, `formatDayShort` uses `en-GB`, both for short weekday+date. Different output for the same intent.
+9. **Reduced motion handled two ways**: the `useReducedMotion` hook, the `motion-reduce:` Tailwind variant (`Skeleton`), a raw `matchMedia` call (`ScrollToCurrentWeek`), and a global `@media` block in `globals.css`.
+
+---
+
+## 6. API / Endpoint Inventory
+
+All handlers except the cron begin with `await auth()` and return `401 {"error":"unauthorized"}` without a session email. All responses are JSON with `_id` stripped. There is no response envelope: success returns the bare resource or `{ ok: true, ... }`; failure returns `{ error: string }`.
+
+### Internal (browser → same origin)
+
+| Method | Path | Purpose | Request | Response | Auth |
+|---|---|---|---|---|---|
+| GET/POST | `/api/auth/[...nextauth]` | Auth.js handlers | — | — | public |
+| GET | `/api/sessions` | All the owner's sessions, date ascending | — | `Session[]` | session |
+| GET | `/api/sessions/[date]` | One session | — | `Session` / 404 `not found` | session |
+| PATCH | `/api/sessions/[date]` | Update status and/or actual | `{ status?, actual? }` | updated `Session`; 400 with a validation message | session |
+| GET | `/api/profile` | The owner's profile | — | `Profile`; 404 `no plan` | session |
+| POST | `/api/push/subscribe` | Store a push subscription | `{ endpoint, keys: { p256dh, auth } }` | `{ ok: true }`; 400 `invalid subscription` | session |
+| POST | `/api/push/unsubscribe` | Remove one endpoint | `{ endpoint }` | `{ ok: true }`; 400 `missing endpoint` | session |
+
+Currently only the two push endpoints are called from app code (`DailyReminderToggle`). `/api/sessions*` and `/api/profile` are a stable read API with no in-repo consumer.
+
+### External / machine
+
+| Method | Path | Purpose | Auth |
+|---|---|---|---|
+| GET | `/api/cron/daily-notify` | Vercel Cron, 09:00 UTC daily: send push reminders, then generate each runner's daily note | `Authorization: Bearer $CRON_SECRET`. `runtime = "nodejs"`, `dynamic = "force-dynamic"`, `maxDuration = 60`. |
+
+### Dev-only (404 in production, checked before auth)
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/dev/notify` | Send today's reminder to the signed-in user's devices now. 409 if no subscription on this device. |
+| POST | `/api/dev/summary` | Force-regenerate today's summary for the signed-in runner. |
+
+### Server actions (the real mutation surface)
+
+| Action | File | Returns |
+|---|---|---|
+| `markStatus(date, status)` | `actions/sessions.ts` | `ActionResult` |
+| `logActual(date, input)` | `actions/sessions.ts` | `ActionResult` (sets status `done`) |
+| `rescheduleRun(from, to, { swap? })` | `actions/sessions.ts` | `RescheduleResult` (may carry a `conflict`) |
+| `shiftWeek(week, deltaDays)` | `actions/sessions.ts` | `ShiftResult` |
+| `generateRecap(date)` | `actions/recap.ts` | `RecapActionResult` |
+| `explainSession(date)` | `actions/explain.ts` | `ExplainActionResult` |
+| `previewPlanRebuild()` | `actions/rebuild.ts` | `PreviewResult` (no writes) |
+| `applyPlanRebuild(proposal)` | `actions/rebuild.ts` | `ApplyResult` |
+
+Inline sign-out and sign-in actions live in `app/settings/page.tsx` and `app/signin/page.tsx`.
+
+---
+
+## 7. App-Specific Additions
+
+Six structural elements aren't covered by sections 1-6 and are load-bearing here.
+
+### 7.1 Multi-tenancy model
+
+- **Tenant key:** `ownerEmail`, always `session.user.email.toLowerCase()`. Never a parameter, a header, a body field, or a query string.
+- **Gate:** `ALLOWED_EMAILS` (comma-separated, lowercased, trimmed) checked in the Auth.js `signIn` callback. `lib/allowlist.ts` has a hardcoded default fallback listing both current runners — if the env var is missing in production, those two still get in.
+- **Isolation:** enforced only by every `lib/db.ts` filter carrying `ownerEmail`. There is no per-tenant database, no row-level security, no middleware. A missing `ownerEmail` in one new query silently breaks isolation for every runner.
+- **The one unscoped read:** `listAllPushSubscriptions()`, used solely by the cron, which then regroups by owner and loads each plan separately.
+- **The cron's owner list** comes from `ALLOWED_EMAILS`, not from the database — a runner removed from the allowlist stops getting notes even if their data remains.
+- **An allowlisted user with no `profile` is valid** and must render an empty state, not an error. `/`, `/plan`, `/dashboard`, and `/settings` all have one.
+- **Seeds are per-owner and additive.** `scripts/seed.ts` is destructive for Néstor only (`deleteMany` scoped to `OWNER`). `seed-lilo.ts` and `add-strength.ts` use `$setOnInsert` upserts on the unique key and only touch dates `>= today`, so they never clobber logged history.
+
+### 7.2 Scheduled job inventory
+
+| Job | Schedule | Entry | Auth | Retry |
+|---|---|---|---|---|
+| Daily notify + summaries | `0 9 * * *` (UTC) — `vercel.json` | `GET /api/cron/daily-notify` | `CRON_SECRET` bearer | None. Idempotent per date, so a manual re-hit is safe: the summary short-circuits to `"exists"` and the push simply re-sends. |
+
+There are no queues, no workers, no background jobs, no retry policies. Timing is deliberately approximate: Vercel Hobby permits one cron run per day, so a single daily fire can't track DST and there is no local-hour gate. `NOTIFY_HOUR` and `torontoHour()` are leftovers from the abandoned hourly design.
+
+### 7.3 Third-party integrations and failure behaviour
+
+| Service | Used by | Failure mode |
+|---|---|---|
+| **MongoDB Atlas** | everything | 5s server-selection/connect timeouts; a failed connect evicts the cached promise so the next request retries rather than re-awaiting a poisoned slot. Errors bubble to `app/error.tsx`. |
+| **Google OAuth** (Auth.js) | sign-in | Non-allowlisted email → `signIn` returns `false` → Auth.js error page. |
+| **Anthropic API** | summary, recap, explanation, rebuild | Library functions throw. Cron catches per owner and records `"error"`. Server actions catch and return `{ ok: false }`; the UI shows a "Try again" affordance. **No retries, no timeout, no fallback model.** Malformed JSON falls back to a degraded parse (recap) or `null` (rebuild → `"no-data"`). |
+| **Web Push (VAPID)** | daily reminder | `configure()` throws once if any VAPID var is missing; the cron catches it and reports `push.error` in the body. Per-send 404/410 prunes the endpoint. Any other send error is counted as not-sent and silently dropped. `normalizeSubject` coerces a bare email to `mailto:`. |
+| **Vercel Cron** | the daily job | No delivery guarantee is assumed; nothing depends on exactly-once. |
+
+### 7.4 Session state machine
+
+States: `planned` (seeded) → `done` | `skipped`, with free movement back to `planned`.
+
+| From | To | Allowed by | Notes |
+|---|---|---|---|
+| `planned` | `done` | Log form, or "Mark done" in the kebab menu | Logging always sets `done`. |
+| `planned` | `skipped` | "Skip" (rendered destructive) | |
+| `done` | anything | Kebab menu / re-log | Client `window.confirm` required. |
+| `skipped` | `done` \| `planned` | Kebab menu | `skipped` sessions can still be rescheduled. |
+
+State drives behaviour well beyond colour:
+
+- **Movable** = `planned` or `skipped` (`MOVABLE`). `done` is pinned in time.
+- **Rebuildable** = `status !== "done"` and `date > today` and `type ∉ {Strength, Race}`.
+- **Recap-eligible** = `done`, a run, with a matching `runUpdatedAt`.
+- **Counts as due** = `date <= today`, regardless of status; `skipped` counts against adherence and breaks the streak.
+- **Feeds charts** = `done` plus the relevant `actual` fields present.
+
+Colour mapping is fixed: `brass` = planned/today, `confirmed` = done, `signal` = skipped/destructive.
+
+### 7.5 Design system
+
+The visual direction is deliberate and narrow: a clean, minimal, mobile-first running app carried by one warm olive palette and good typography. There is no theme, no motif, and no themed vocabulary. Spend restraint everywhere.
+
+**Palette.** The nine tokens in the `@theme` block of `app/globals.css` are the complete palette. Nothing outside this table may be introduced.
+
+| Token | Hex | Role |
+|---|---|---|
+| `field` | `#23261a` | App background. Warm deep olive, deliberately not black. |
+| `panel` | `#2e3221` | Secondary surfaces, most cards. |
+| `raised` | `#3a3f29` | The focused element; the day's session card. |
+| `line` | `#4a4f35` | Hairlines and borders. |
+| `canvas` | `#d8cdb0` | Primary text. |
+| `canvas-dim` | `#a39c82` | Secondary text, labels, eyebrows. |
+| `brass` | `#c49a4a` | The single accent: primary actions, today, key numbers. |
+| `confirmed` | `#6e8a4e` | `done` status. |
+| `signal` | `#a8432e` | `skipped` status, destructive actions, errors. |
+
+Brass is precious: at most one brass element per view, plus status colours where the data demands them. Everything else stays in the olive and canvas range. `#23261a` is also the manifest `background_color`, the `theme_color`, and the iOS status bar colour.
+
+**Type.** Three families, each with one job:
+- **Space Grotesk** (`--font-display`) — the wordmark, section headings, button labels, eyebrows. Used with restraint.
+- **Inter** (`--font-body`) — all reading text.
+- **JetBrains Mono** (`--font-mono`) — every number, so stats and paces read as data.
+
+Root font size is `112.5%` (16px → 18px) so the whole rem-based scale moves together. Uppercase micro-labels go through the `.eyebrow` class (display family, uppercase, `0.16em` tracking, `0.72rem`, `canvas-dim`) — never hand-rolled. Sentence case everywhere else.
+
+**Layout and components.**
+- Single column, thumb-reachable, `max-w-md` (~28rem) centred, `px-5 py-8`.
+- Cards: `panel` or `raised` background, `line` border, `rounded-md`, generous padding. The day's focused card gets a 2px status-coloured border.
+- Status reads through colour plus a short text label, never icons-as-decoration.
+- A fixed bottom tab bar (Today / Plan / Dashboard) with safe-area padding; hidden on `/signin`.
+
+**Copy.** Plain verbs, sentence case, no filler. A button says what it does and keeps that word through the flow. Empty states say what to do next. Errors say what happened and how to fix it — never apologise, never go vague. No themed, military, or "drill" vocabulary anywhere in UI text, identifiers, or comments; the app name is the sole exception, and everything around it must read as an ordinary running app.
+
+**Quality floor — every screen, no exceptions.** Layout holds from 360px wide. Keyboard focus is always visible (the standard `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass`). `prefers-reduced-motion` is respected. Contrast holds against the dark field. Animation is optional and quiet; a subtle state transition beats scattered effects.
+
+### 7.6 Operational runbook
+
+**Environment variables.** All secrets live in env vars; `.env.example` is the template and must be updated whenever a variable is added.
+
+| Variable | Used by | Notes |
+|---|---|---|
+| `AUTH_SECRET` | Auth.js | `npx auth secret` |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Auth.js Google provider | Web OAuth client |
+| `MONGODB_URI` | `lib/mongodb.ts` | Throws at import if unset |
+| `MONGODB_DB` | `lib/mongodb.ts` | Defaults to `altrotemarr` |
+| `ALLOWED_EMAILS` | `lib/allowlist.ts` | Comma-separated, lowercase. Has a hardcoded fallback — see drift item 10. |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | `DailyReminderToggle` (browser) | Same value as `VAPID_PUBLIC_KEY` |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | `lib/push.ts` | All three required or `configure()` throws. Subject is coerced to `mailto:`. |
+| `ANTHROPIC_API_KEY` | all four AI modules | Read implicitly by `new Anthropic()` |
+| `CRON_SECRET` | `/api/cron/daily-notify` | Bearer token; fails closed when unset |
+| `NOTIFY_HOUR` | nothing | Dead — see drift item 1 |
+
+**Local setup.** `npm install`; copy `.env.example` to `.env.local` and fill it; Google OAuth redirect URI `http://localhost:3000/api/auth/callback/google`; `npm run seed`; `npm run dev`.
+
+**Deploy.** Push to GitHub, import in Vercel, add every `.env.local` variable to the project, add the Vercel callback URL to the Google OAuth client, deploy, then run the seed once against the same Atlas database. On a phone: open the URL and Add to Home Screen / Install app.
+
+**Adding a runner.** The established procedure, as performed for Lilo:
+1. Write `lib/plan-seed-<name>.ts` exporting `<NAME>_OWNER`, a `Profile`, and a `Seed[]` of run sessions. Reuse `generateStrengthSessions(runDates)` from `lib/plan-seed.ts` rather than authoring strength days by hand.
+2. Add a `scripts/seed-<name>.ts` that upserts the profile, ensures the `{ownerEmail, date}` unique index, and inserts sessions with `$setOnInsert` filtered to `date >= todayStr()` — additive and idempotent, so it never clobbers logged history and never touches another runner's data.
+3. Add an `npm` script alongside `seed` and `seed-lilo`.
+4. Add the email to `ALLOWED_EMAILS` in every environment.
+
+Never make a new runner's seed destructive. `scripts/seed.ts` uses `deleteMany` and is the legacy exception, scoped to a single hardcoded `OWNER`.
+
+**Verifying a change.** `npx tsc --noEmit` and `npm run lint`. There is no test suite (see section 1). Diagnose production data problems through the app's own endpoints or pasted output, not a direct Atlas connection.
+
+---
+
+## 8. Rules for Future Changes
+
+**Data access**
+- All MongoDB queries live in `lib/db.ts`. Never write a query inline in a route, action, component, or script.
+- Every `lib/db.ts` function takes `owner: string` first and includes `ownerEmail: owner` in its filter. The only permitted exception is a cron-scoped `listAll*` that regroups by owner immediately.
+- Never accept an owner, email, or tenant identifier from a client payload, header, or query string. Derive it from `await auth()`.
+- Project `{ _id: 0 }` on every read.
+- Use the native `mongodb` driver. Never add Mongoose or any ODM. Never add the Atlas Data API.
+- New collections must have their document interface added to `lib/types.ts` before first use, and their index creation must live in one place — not inside a hot write path (fix `savePushSubscription`, don't copy it).
+- Any write that can touch more than one document under the unique `{ownerEmail, date}` index must use the temp-date two-phase transaction pattern of `moveSessions`.
+
+**Auth**
+- Every route handler and server action calls `await auth()` and returns/reports unauthorized without a session email. The only exception is a machine-triggered cron route, which must be gated by a bearer secret that fails closed when the env var is absent.
+- Dev-only endpoints check `NODE_ENV === "production"` and return 404 **before** touching auth or the database.
+
+**Dates**
+- Dates are `YYYY-MM-DD` strings compared lexicographically. All calendar math goes through `lib/date.ts`. Do not introduce Date-object timezone arithmetic for calendar logic.
+- "Today" is `todayStr()` in `America/Toronto`.
+
+**Mutations and errors**
+- New mutations are server actions returning a discriminated union (`{ ok: true, ... } | { ok: false, error }`), not thrown exceptions. Log the real cause with `console.error` and return a message the UI can show.
+- New route handlers keep the existing shape: bare resource or `{ ok: true, ... }` on success, `{ error: string }` with an appropriate status on failure. Do not introduce a response envelope for one endpoint only — if you want one, migrate all of them.
+- All external input is validated in `lib/validation.ts` (or an equivalent pure validator) before it reaches `lib/db.ts`.
+- Server-side re-derivation is mandatory for anything the client proposes: re-derive the expected set, validate against it, and add a restrictive filter on the write itself. Follow `applyRebuild` + `rebuildFutureSessions`.
+
+**AI features**
+- A new AI feature goes in its own `lib/<feature>.ts` and follows the established four-part shape: exported `*_MODEL` const, `SYSTEM_PROMPT`, pure `buildXPrompt`, `generateX`, and an owner-scoped idempotent `generateAndStoreX`.
+- Every AI output must be cached in a collection with an idempotency key (a date, or a content hash) so re-renders never re-bill. State the key in a comment.
+- Every system prompt ends with the standard voice clause: plain, warm, coach-like; no hype, no clichés, no emoji; ordinary running language only; never military, drill, or boot-camp vocabulary; no markdown.
+- JSON responses are unfenced and parsed tolerantly with a defined fallback. Never assume well-formed output.
+- Model calls have no timeout today. If you add a feature to the cron path, it goes **after** the push send, or you add a timeout.
+
+**UI** — the design system in section 7.5 is binding; these are the enforcement rules.
+- Use only the nine palette tokens and three type families defined in 7.5. Never introduce a colour, a font, or a hand-rolled eyebrow style outside them.
+- Reads happen in server components; `"use client"` only on interactive leaves.
+- Every screen meets the quality floor in 7.5: 360px, visible keyboard focus, reduced motion, contrast. Prefer the `useReducedMotion` hook for new code.
+- Every number renders in the mono font.
+- Every route with a data fetch has a `loading.tsx` and an empty state.
+- Product copy follows the copy rules in 7.5. No themed, military, or "drill" vocabulary anywhere in UI text, identifiers, or comments. The app name is the only exception.
+- If a Recharts-facing change needs a colour, add it to `chart-theme.ts` mirroring an existing token — never a fresh hex.
+
+**Non-negotiable scope limits**
+- `public/sw.js` stays push-only: `push` and `notificationclick` handlers, no `fetch` handler, no `caches`. Do not add offline caching or background sync.
+- Do not add a second cron entry without confirming the plan tier allows it; today's single job exists because Hobby permits one per day.
+- Do not introduce a state machine transition for `Session.status` beyond `planned`/`done`/`skipped` without updating section 7.4.
+
+**Process**
+- Secrets in env vars only. Never hardcode credentials; never commit `.env.local`. New env vars go in `.env.example` with a comment.
+- `npx tsc --noEmit` and `npm run lint` must pass. No `any` without a written reason.
+- Never add Claude or AI attribution to commit messages. Never push without being asked.
+- Update this file when you change the data model, add a collection, add an endpoint or action, add an integration, or change a business rule. Code that contradicts CONTEXT.md is drift: flag it, don't propagate it.
+
+**Rules the maintainer should decide on (currently unsettled)**
+- Whether `PATCH /api/sessions/[date]` and the read API stay as a supported surface or get removed as unused. Right now both paths must be kept in sync by hand.
+- Whether to add tests. The pure functions in `lib/stats.ts`, `lib/pace.ts`, `lib/date.ts`, `lib/validation.ts`, and `coerceProposal` are designed for it and are the highest-value targets.
+- Whether `Session.type` becomes a union. Six files currently do ad-hoc string comparison against it.
+
+---
+
+## 9. Known Drift / Open Questions
+
+Ordered roughly by how much they'd bite.
+
+1. **The daily reminder fires at a time nobody intended, and the DST machinery is dead.** The original design was an hourly cron gated on `NOTIFY_HOUR` so the send landed at 7:00 AM Toronto year-round. What ships is `0 9 * * *` in `vercel.json` — once daily at 09:00 UTC, so 5:00 AM EDT and 4:00 AM EST — with no hour gate in the handler. The handler's comment explains why (Vercel Hobby allows one cron run per day). Consequences: `NOTIFY_HOUR` in `.env.example` and `torontoHour()` in `lib/date.ts` are both unreferenced, and the send time drifts an hour with DST.
+
+2. **The reminder time is stated three different ways.** `DailyReminderToggle` tells the user "A 5:00 AM notification", `.env.example` says `NOTIFY_HOUR=7`, and the actual fire time is 09:00 UTC (5:00 AM only during EDT). Decide the real time, then make the copy, the env template, and the schedule agree.
+
+3. **`requireOwner()` is duplicated verbatim in four action files**, and the route handlers inline a fifth copy of the same three lines. One divergent edit silently breaks tenancy in one path.
+
+4. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
+
+5. **Missing indexes on two hot collections.** `dailySummaries` is queried by `{ownerEmail, date}` on every home-page and plan-detail render, and `sessionExplanations` by `{ownerEmail, key}` on every run detail. Neither has an index and neither has a uniqueness constraint, so `replaceOne(..., {upsert:true})` can race into duplicates. `pushSubscriptions` has the opposite problem: `createIndex` runs inside `savePushSubscription` on every call.
+
+6. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
+
+7. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
+
+8. **Dead or unused code:** `torontoHour()` (`lib/date.ts`), `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
+
+9. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
+
+10. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
+
+11. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
+
+12. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
+
+13. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
+
+14. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.
+
+15. **`.gitignore` has uncommitted local modifications** (it currently also ignores `.idea` and `.assets`, and the file lacks a trailing newline). `.env.local` is correctly ignored. Minor, but the change is sitting unstaged.

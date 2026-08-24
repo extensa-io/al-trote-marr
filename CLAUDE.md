@@ -1,6 +1,10 @@
 # Al Trote Marr! — Claude Code working notes
 
-Personal multi-tenant running training tracker. You are continuing the build from the foundation already in this repo. Before writing code, read `docs/ARCHITECTURE.md`, `docs/DESIGN.md`, and `docs/ROADMAP.md`. Work one ROADMAP phase at a time and stop for review at the end of each phase.
+Personal multi-tenant running training tracker. You are continuing the build from the foundation already in this repo.
+
+**Read `CONTEXT.md` at the project root before writing any code.** It is the single authoritative reference for this app: architecture, data model, business rules, conventions, the design system, and the rules every change must follow. This file is the short brief; `CONTEXT.md` is the full rulebook, and where the two diverge, `CONTEXT.md` wins. Unbuilt scope lives in `BACKLOG.md`.
+
+Code that contradicts `CONTEXT.md` is drift: flag it, don't copy it.
 
 ## Stack
 - Next.js 16 (App Router, TypeScript, strict)
@@ -19,6 +23,7 @@ Personal multi-tenant running training tracker. You are continuing the build fro
 - All new data access goes through `lib/db.ts`. Do not write Mongo queries inline in routes or components.
 
 ## Design rules
+Full design system in `CONTEXT.md` section 7.5.
 - Use only the palette and type tokens in `app/globals.css`. Brass `#c49a4a` is the single accent.
 - Clean, minimal, mobile-first. Plain product copy. No themed, military, or "drill" vocabulary anywhere in UI text, identifiers, or comments. The app name stays; everything around it reads as an ordinary running app.
 - Quality floor on every screen: visible keyboard focus, `prefers-reduced-motion` respected, layout holds down to 360px wide.
@@ -40,10 +45,12 @@ Personal multi-tenant running training tracker. You are continuing the build fro
 - `app/api/**` — route handlers, all auth-checked
 - `app/page.tsx` — home (Today)
 - `app/signin/page.tsx` — sign in
-- `docs/**` — architecture, design, roadmap, prompts
+- `CONTEXT.md` — the authoritative rulebook (read this first)
+- `BACKLOG.md` — unbuilt scope
 
 ## Definition of done for any change
 - TypeScript checks and lint pass. No `any` without a written reason.
 - New data access is in `lib/db.ts` and owner-scoped.
-- New UI uses palette tokens and matches `docs/DESIGN.md`.
-- Tick the acceptance boxes in `docs/ROADMAP.md` when a phase is complete.
+- New UI uses palette tokens and meets the quality floor in `CONTEXT.md` 7.5.
+- The change satisfies the rules in `CONTEXT.md` section 8.
+- `CONTEXT.md` is updated when the data model, an endpoint or action, an integration, or a business rule changes.
