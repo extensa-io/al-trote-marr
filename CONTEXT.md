@@ -77,7 +77,7 @@ The client/server split is deliberate: everything that reads is a server compone
 ### Entry points
 
 - **Web**: `app/layout.tsx` → the five routes above.
-- **Cron**: `GET /api/cron/daily-notify`, scheduled by `vercel.json` at `0 9 * * *` (09:00 UTC, once daily). This is the only scheduled job.
+- **Cron**: `GET /api/cron/daily-notify`, scheduled by `vercel.json` at `0 11 * * *` and `0 12 * * *` (both UTC hours that can be 7:00 AM Toronto). An hour gate in the handler lets exactly one through. This is the only scheduled job.
 - **CLI**: `npm run ensure-indexes`, `npm run seed`, `npm run seed-lilo`, `npm run add-strength`.
 - **Service worker**: `public/sw.js`, registered on demand by `DailyReminderToggle`, never by the app shell.
 
@@ -218,8 +218,9 @@ The unique `{ownerEmail, date}` index forbids two docs sharing a date even trans
 
 ### Daily cron — `GET /api/cron/daily-notify`
 
-Runs once a day at 09:00 UTC. Gated by `Authorization: Bearer ${CRON_SECRET}`; a missing `CRON_SECRET` env var fails closed (401). This is the **only** handler that does not call `auth()`.
+Invoked twice a day, at 11:00 and 12:00 UTC. Gated by `Authorization: Bearer ${CRON_SECRET}`; a missing `CRON_SECRET` env var fails closed (401). This is the **only** handler that does not call `auth()`.
 
+0. **Hour gate.** Cron schedules are UTC, so no single daily entry holds a fixed local time across DST. Both UTC hours that can be 7:00 AM Toronto are scheduled, and the run whose `torontoHour()` does not equal `NOTIFY_HOUR` (default 7) returns `{ ok: true, skipped: true, localHour, notifyHour }` having done nothing. Two invocations, one send, correct year-round.
 1. Load all push subscriptions (across all owners), group by `ownerEmail`.
 2. Per owner: load sessions + profile once, build the message with `buildDailyMessage`, send to each of that owner's endpoints. 404/410 → delete that endpoint and count it as pruned.
 3. VAPID misconfiguration throws from `configure()` before anything sends; that is caught and surfaced in the response body as `push.error` rather than a 500.
@@ -428,9 +429,13 @@ Six structural elements aren't covered by sections 1-6 and are load-bearing here
 
 | Job | Schedule | Entry | Auth | Retry |
 |---|---|---|---|---|
-| Daily notify + summaries | `0 9 * * *` (UTC) — `vercel.json` | `GET /api/cron/daily-notify` | `CRON_SECRET` bearer | None. Idempotent per date, so a manual re-hit is safe: the summary short-circuits to `"exists"` and the push simply re-sends. |
+| Daily notify + summaries | `0 11 * * *` and `0 12 * * *` (UTC) — `vercel.json` | `GET /api/cron/daily-notify` | `CRON_SECRET` bearer | None. Idempotent per date, so a manual re-hit is safe: the summary short-circuits to `"exists"` and the push simply re-sends. |
 
-There are no queues, no workers, no background jobs, no retry policies. Timing is deliberately approximate: Vercel Hobby permits one cron run per day, so a single daily fire can't track DST and there is no local-hour gate. `NOTIFY_HOUR` is a leftover from the abandoned hourly design and is read by nothing.
+There are no queues, no workers, no background jobs, no retry policies.
+
+**Why two entries for one daily job.** Cron schedules are UTC and Toronto observes DST, so a single daily entry drifts an hour twice a year. Scheduling both candidate UTC hours and gating on `torontoHour() === NOTIFY_HOUR` pins the send to 7:00 AM local year-round at the cost of one extra no-op invocation per day. This is cheaper than the hourly-cron-plus-gate alternative the Pro plan would also allow (2 invocations/day rather than 24) and works on any plan tier.
+
+**Known tolerance.** Vercel may fire a cron a few minutes late. A run that slips across an hour boundary can make the gate skip both invocations (no reminder that day) or pass both (two sends). A double send is harmless — the notification carries `tag: "daily-reminder"`, so the second replaces the first in the tray rather than stacking. There is no delivery ledger; nothing depends on exactly-once.
 
 ### 7.3 Third-party integrations and failure behaviour
 
@@ -515,7 +520,7 @@ Root font size is `112.5%` (16px → 18px) so the whole rem-based scale moves to
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | `lib/push.ts` | All three required or `configure()` throws. Subject is coerced to `mailto:`. |
 | `ANTHROPIC_API_KEY` | all four AI modules | Read implicitly by `new Anthropic()` |
 | `CRON_SECRET` | `/api/cron/daily-notify` | Bearer token; fails closed when unset |
-| `NOTIFY_HOUR` | nothing | Dead — see drift item 1 |
+| `NOTIFY_HOUR` | `/api/cron/daily-notify` | Target local Toronto hour, 0-23. Defaults to 7 when unset or unparseable. Must match the UTC hours in `vercel.json`. |
 
 **Indexes.** Declared in `lib/indexes.ts`, applied by `npm run ensure-indexes`. Run it against every environment after a deploy that adds a collection or an index. It reports per-index outcomes and exits non-zero if any failed, so a unique index blocked by pre-existing duplicates is visible rather than silently absent. All five indexes were verified in place against production on 2026-08-24.
 
@@ -598,26 +603,22 @@ Never make a new runner's seed destructive. `scripts/seed.ts` uses `deleteMany` 
 
 Ordered roughly by how much they'd bite.
 
-1. **The daily reminder fires at a time nobody intended, and the DST machinery is dead.** The original design was an hourly cron gated on `NOTIFY_HOUR` so the send landed at 7:00 AM Toronto year-round. What ships is `0 9 * * *` in `vercel.json` — once daily at 09:00 UTC, so 5:00 AM EDT and 4:00 AM EST — with no hour gate in the handler. The handler's comment explains why (Vercel Hobby allows one cron run per day). Consequence: `NOTIFY_HOUR` in `.env.example` is read by nothing, and the send time drifts an hour with DST.
+1. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
 
-2. **The reminder time is stated three different ways.** `DailyReminderToggle` tells the user "A 5:00 AM notification", `.env.example` says `NOTIFY_HOUR=7`, and the actual fire time is 09:00 UTC (5:00 AM only during EDT). Decide the real time, then make the copy, the env template, and the schedule agree.
+2. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
 
-3. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
+3. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
 
-4. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
+4. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
 
-5. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
+5. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
 
-6. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
+6. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
 
-7. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
+7. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
 
-8. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
+8. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
 
-9. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
+9. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
 
-10. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
-
-11. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
-
-12. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.
+10. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.

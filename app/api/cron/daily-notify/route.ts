@@ -8,18 +8,37 @@ import { ALLOWED_EMAILS } from "@/lib/allowlist";
 import { buildDailyMessage } from "@/lib/notify";
 import { sendPush } from "@/lib/push";
 import { generateAndStoreSummary, type SummaryOutcome } from "@/lib/summary";
-import { todayStr } from "@/lib/date";
+import { todayStr, torontoHour } from "@/lib/date";
 import type { PushSubscriptionDoc } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Machine-triggered daily job (no user session), gated by CRON_SECRET.
-// Vercel Hobby allows one cron run per day, so this single daily route runs
+const DEFAULT_NOTIFY_HOUR = 7;
+
+// The local Toronto hour the reminder should arrive. Anything unset, unparseable
+// or out of range falls back to 7 AM rather than silently notifying at midnight.
+function notifyHour(): number {
+  const raw = parseInt(process.env.NOTIFY_HOUR ?? "", 10);
+  return Number.isInteger(raw) && raw >= 0 && raw <= 23 ? raw : DEFAULT_NOTIFY_HOUR;
+}
+
+// Machine-triggered daily job (no user session), gated by CRON_SECRET. It runs
 // both daily tasks: send the push reminder and generate each runner's AI
-// progress note. Timing is approximate — Vercel fires within the hour and a
-// single daily cron can't track DST — so there is no Toronto-hour gate.
+// progress note.
+//
+// Fixed local time across DST: a cron schedule is UTC, so no single daily entry
+// can hold 7 AM Toronto all year — it drifts an hour at each changeover.
+// `vercel.json` therefore schedules BOTH UTC hours that can be 7 AM local
+// (11:00 for EDT, 12:00 for EST) and the gate below lets exactly one of them
+// through. Two invocations a day, one send, correct year-round.
+//
+// Vercel may fire a cron a few minutes late. If a run slips across an hour
+// boundary the gate can in principle skip both runs (no reminder that day) or
+// pass both (two sends). A double send is harmless: the notification carries
+// tag "daily-reminder", so the second replaces the first in the tray rather
+// than stacking.
 //
 // Order matters: the push goes out FIRST. The whole function is capped at
 // maxDuration, and summary generation makes a blocking, adaptive-thinking
@@ -33,6 +52,14 @@ export async function GET(req: Request) {
   const authz = req.headers.get("authorization");
   if (!secret || authz !== `Bearer ${secret}`) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  // Only the scheduled run that lands on the target local hour does the work;
+  // its DST-shifted twin returns early having sent and generated nothing.
+  const hour = torontoHour();
+  const target = notifyHour();
+  if (hour !== target) {
+    return Response.json({ ok: true, skipped: true, localHour: hour, notifyHour: target });
   }
 
   const today = todayStr();
