@@ -2,7 +2,9 @@
 
 import { useOptimistic, useState, useTransition } from "react";
 import { logActual, markStatus } from "@/app/actions/sessions";
+import DurationField from "@/app/_components/DurationField";
 import KebabMenu from "@/app/_components/KebabMenu";
+import { durationDigitsToMinutes, formatDuration, minutesToDurationDigits } from "@/lib/pace";
 import type { Session, Status } from "@/lib/types";
 
 interface Props {
@@ -18,12 +20,16 @@ export default function StrengthDetail({ session }: Props) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [duration, setDuration] = useState("");
+  const [durationDigits, setDurationDigits] = useState("");
   const [weight, setWeight] = useState("");
   const [notes, setNotes] = useState("");
 
   function openLog() {
-    setDuration(optimistic.actual?.durationMin?.toString() ?? "");
+    setDurationDigits(
+      optimistic.actual?.durationMin != null
+        ? minutesToDurationDigits(optimistic.actual.durationMin)
+        : "",
+    );
     setWeight(optimistic.actual?.weightKg?.toString() ?? "");
     setNotes(optimistic.actual?.notes ?? "");
     setError(null);
@@ -46,11 +52,6 @@ export default function StrengthDetail({ session }: Props) {
   function submitLog(event: React.FormEvent) {
     event.preventDefault();
 
-    if (duration.trim() !== "" && !Number.isFinite(Number(duration))) {
-      setError("Time spent must be a number of minutes");
-      return;
-    }
-
     if (optimistic.status === "done") {
       const confirmed = window.confirm("This session is already marked done. Save changes anyway?");
       if (!confirmed) return;
@@ -58,8 +59,9 @@ export default function StrengthDetail({ session }: Props) {
 
     setError(null);
     const trimmedNotes = notes.trim();
+    const parsedDuration = durationDigitsToMinutes(durationDigits) ?? undefined;
     const optimisticActual = {
-      durationMin: duration.trim() === "" ? undefined : Number(duration),
+      durationMin: parsedDuration,
       weightKg: weight.trim() === "" ? undefined : Number(weight),
       notes: trimmedNotes || undefined,
     };
@@ -67,7 +69,7 @@ export default function StrengthDetail({ session }: Props) {
     startTransition(async () => {
       addOptimistic({ status: "done", actual: optimisticActual });
       const result = await logActual(session.date, {
-        durationMin: duration.trim() === "" ? undefined : duration,
+        durationMin: parsedDuration,
         weightKg: weight.trim() === "" ? undefined : weight,
         notes: trimmedNotes || undefined,
       });
@@ -117,7 +119,7 @@ export default function StrengthDetail({ session }: Props) {
       {hasLog && !editing ? (
         <dl className="grid grid-cols-2 gap-y-2 gap-x-4 font-mono text-sm mb-4">
           {actual?.durationMin != null && (
-            <Row label="Time spent" value={`${actual.durationMin} min`} />
+            <Row label="Time spent" value={formatDuration(actual.durationMin)} />
           )}
           {actual?.weightKg != null && <Row label="Weight" value={`${actual.weightKg} kg`} />}
           {actual?.notes && (
@@ -131,17 +133,15 @@ export default function StrengthDetail({ session }: Props) {
 
       {editing ? (
         <form onSubmit={submitLog} className="space-y-3">
+          {/* Full width: the entry hint needs a line of its own at 360px. */}
+          <DurationField
+            id="strength-duration"
+            label="Time spent"
+            digits={durationDigits}
+            onDigits={setDurationDigits}
+            disabled={pending}
+          />
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Time spent (min)" htmlFor="strength-duration">
-              <input
-                id="strength-duration"
-                inputMode="numeric"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-                className={inputClass}
-                placeholder="20"
-              />
-            </Field>
             <Field label="Weight (kg)" htmlFor="strength-weight">
               <input
                 id="strength-weight"

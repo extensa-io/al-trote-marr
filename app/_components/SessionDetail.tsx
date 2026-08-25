@@ -2,7 +2,14 @@
 
 import { useOptimistic, useState, useTransition } from "react";
 import { logActual, markStatus, rescheduleRun } from "@/app/actions/sessions";
-import { formatMmSs, formatPace, paceSecPerKm, parseMmSs } from "@/lib/pace";
+import {
+  durationDigitsToMinutes,
+  formatDuration,
+  formatPace,
+  minutesToDurationDigits,
+  paceSecPerKm,
+} from "@/lib/pace";
+import DurationField from "@/app/_components/DurationField";
 import { formatNiceDate, shiftDays } from "@/lib/date";
 import { stridesFromTitle } from "@/lib/prescription";
 import KebabMenu from "@/app/_components/KebabMenu";
@@ -24,7 +31,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
 
   const [km, setKm] = useState("");
   const [avgHr, setAvgHr] = useState("");
-  const [duration, setDuration] = useState("");
+  const [durationDigits, setDurationDigits] = useState("");
   const [weight, setWeight] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -73,7 +80,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
   function openLog() {
     setKm("");
     setAvgHr("");
-    setDuration("");
+    setDurationDigits("");
     setWeight("");
     setNotes("");
     setError(null);
@@ -83,8 +90,10 @@ export default function SessionDetail({ session, hrTarget }: Props) {
   function openEdit() {
     setKm(optimistic.actual?.km?.toString() ?? "");
     setAvgHr(optimistic.actual?.avgHr?.toString() ?? "");
-    setDuration(
-      optimistic.actual?.durationMin != null ? formatMmSs(optimistic.actual.durationMin) : "",
+    setDurationDigits(
+      optimistic.actual?.durationMin != null
+        ? minutesToDurationDigits(optimistic.actual.durationMin)
+        : "",
     );
     setWeight(optimistic.actual?.weightKg?.toString() ?? "");
     setNotes(optimistic.actual?.notes ?? "");
@@ -113,12 +122,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
   function submitLog(event: React.FormEvent) {
     event.preventDefault();
 
-    const trimmedDuration = duration.trim();
-    const parsedDuration = trimmedDuration === "" ? undefined : parseMmSs(trimmedDuration);
-    if (trimmedDuration !== "" && parsedDuration == null) {
-      setError("Duration must be minutes:seconds, like 28:45 or 28.45");
-      return;
-    }
+    const parsedDuration = durationDigitsToMinutes(durationDigits) ?? undefined;
 
     if (optimistic.status === "done") {
       const confirmed = window.confirm("This run is already marked done. Save changes anyway?");
@@ -195,7 +199,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
           )}
           {pace != null && <Row label="Pace" value={formatPace(pace)} />}
           {actual.durationMin != null && (
-            <Row label="Duration" value={formatMmSs(actual.durationMin)} />
+            <Row label="Duration" value={formatDuration(actual.durationMin)} />
           )}
           {actual.avgHr != null && <Row label="Avg HR" value={`${actual.avgHr} bpm`} />}
           {actual.weightKg != null && <Row label="Weight" value={`${actual.weightKg} kg`} />}
@@ -231,16 +235,6 @@ export default function SessionDetail({ session, hrTarget }: Props) {
                 placeholder="138"
               />
             </Field>
-            <Field label="Duration (min:sec)" htmlFor="duration">
-              <input
-                id="duration"
-                inputMode="decimal"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-                className={inputClass}
-                placeholder="28:45 or 28.45"
-              />
-            </Field>
             <Field label="Weight (kg)" htmlFor="weight">
               <input
                 id="weight"
@@ -252,8 +246,16 @@ export default function SessionDetail({ session, hrTarget }: Props) {
               />
             </Field>
           </div>
+          {/* Full width: the entry hint needs a line of its own at 360px. */}
+          <DurationField
+            id="duration"
+            label="Duration"
+            digits={durationDigits}
+            onDigits={setDurationDigits}
+            disabled={pending}
+          />
           <p className="font-mono text-canvas-dim text-xs">
-            Pace {formatPace(derivePreviewPace(km, duration))}
+            Pace {formatPace(derivePreviewPace(km, durationDigits))}
           </p>
           <Field label="Notes" htmlFor="notes">
             <textarea
@@ -424,9 +426,9 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function derivePreviewPace(km: string, duration: string): number | null {
+function derivePreviewPace(km: string, durationDigits: string): number | null {
   const kmNum = Number(km);
-  const durationMin = parseMmSs(duration);
+  const durationMin = durationDigitsToMinutes(durationDigits);
   if (!Number.isFinite(kmNum) || durationMin == null) return null;
   return paceSecPerKm(kmNum, durationMin);
 }

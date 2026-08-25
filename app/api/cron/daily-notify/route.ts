@@ -13,7 +13,12 @@ import type { PushSubscriptionDoc } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300s is the platform default and costs nothing extra. The push is sent first
+// and is fast; the budget exists for the per-runner model calls that follow,
+// which have no timeout of their own. If those overrun, the platform kills the
+// function after the notifications have already shipped and that day's progress
+// notes are simply not written — the next morning writes fresh ones.
+export const maxDuration = 300;
 
 const DEFAULT_NOTIFY_HOUR = 7;
 

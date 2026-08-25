@@ -58,7 +58,7 @@ The client/server split is deliberate: everything that reads is a server compone
 | `lib/types.ts` | All persisted document interfaces plus `Phase`/`Status` unions. |
 | `lib/date.ts` | `YYYY-MM-DD` string calendar math, all `America/Toronto` / UTC-pinned. |
 | `lib/validation.ts` | Input coercion and range checks for `status` and `actual`. Returns a `ValidationResult<T>` discriminated union, never throws. |
-| `lib/pace.ts` | Pace parsing (`mm:ss` and mobile-keypad variants) and formatting. Pace is always derived, never stored. |
+| `lib/pace.ts` | Duration entry (digit-stream conversion) and pace formatting. Pace is always derived, never stored. |
 | `lib/prescription.ts` | Parses prescription strings/labels: zone label → bpm range, strides count from a title. |
 | `lib/stats.ts` | Every dashboard formula as a pure function over `Session[]` + `Profile`. No I/O, no React. |
 | `lib/notify.ts` | Builds the push notification `{title, body}` from stats. Pure. |
@@ -172,7 +172,7 @@ Everything else — `type`, `zone`, `title`, `plannedKm`, `phase`, `week`, `day`
 ### Schema inconsistencies and dead fields
 
 - `profile.vo2` and `profile.baseline` are stored and displayed on `/settings`, but feed no calculation.
-- `Actual.durationMin` is overloaded: minutes-run for runs, minutes-spent for strength. Both go into the same field with different UI labels and different parsers (`parseMmSs` for runs, bare `Number()` for strength).
+- `Actual.durationMin` is overloaded: minutes-run for runs, minutes-spent for strength. Both go into the same field under different UI labels, but they now share one parser and one input control.
 - `Session.type` is an unconstrained `string` while `phase` and `status` are unions. Type-based behaviour is scattered across `Set` literals: `EASY_TYPES` in `stats.ts`, `REWRITE_TYPES` in `rebuild.ts`, `STRENGTH_TYPE` in `plan-seed.ts`, plus inline `!== "Strength"` checks in at least six files.
 
 ---
@@ -187,7 +187,7 @@ Every protected page repeats the same three lines: `await auth()`, `redirect("/s
 
 ### Logging a run
 
-1. `SessionDetail` (client) collects km, avg HR, duration, weight, notes. Duration is parsed client-side by `parseMmSs`, which accepts `28:45`, `28.45`, `28,45`, `28 45`, or `28` — mobile numeric keypads expose no colon.
+1. `SessionDetail` (client) collects km, avg HR, duration, weight, notes. Duration comes from the shared `DurationField`: a digit stream read right to left, so `2845` is 28:45 and `12832` is 1:28:32. A mobile numeric keypad exposes no colon, and a minutes-only field would force the runner to convert an hour-plus run by hand; digits-only avoids both.
 2. `useOptimistic` applies the patch immediately; `logActual(date, input)` runs in a transition.
 3. The action re-derives `owner` from the session, validates via `validateActual`, and calls `updateSession(owner, date, { status: "done", actual })`.
 4. `updateSession` always sets `updatedAt` to now, `$set`s only the provided keys, and re-reads the doc to return it.
@@ -329,6 +329,7 @@ Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired
 - `"use client"` only on leaves that need interaction. Client components import server actions directly.
 - `useOptimistic` + `useTransition` for mutations; local `error` state rendered in `signal` colour.
 - `useSyncExternalStore` for browser-media/storage subscriptions (`useReducedMotion`, `InstallHint`).
+- Duration is entered only through `app/_components/DurationField.tsx`, shared by the run and strength forms. It holds raw digits; conversion lives in `lib/pace.ts`. Never hand-roll a duration input.
 - Charts take `isAnimationActive={!useReducedMotion()}`.
 - Every interactive element carries `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass`.
 
@@ -339,7 +340,7 @@ Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired
 - Mono font for every number.
 
 **Comments**
-- Non-obvious decisions carry a "why" comment above the function. This is a strong, consistent habit (`lib/mongodb.ts`, `moveSessions`, `rebuildFutureSessions`, `upsertDailySummary`, the cron ordering, `parseMmSs`, the summary cutoff). Preserve it.
+- Non-obvious decisions carry a "why" comment above the function. This is a strong, consistent habit (`lib/mongodb.ts`, `moveSessions`, `rebuildFutureSessions`, `upsertDailySummary`, the cron ordering, the duration digit stream, the summary cutoff). Preserve it.
 
 **AI feature shape** — every one of the four follows it:
 1. `export const X_MODEL = "claude-opus-4-8"`.
@@ -353,7 +354,6 @@ Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired
 
 ### Inconsistencies to resolve (not to imitate)
 
-1. **Two duration-input conventions.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` accepts bare minutes via `Number()` and does its own ad-hoc validation. Same `durationMin` field, two contracts.
 2. **Two mutation paths for the same write.** `PATCH /api/sessions/[date]` and the `logActual`/`markStatus` actions both validate and call `updateSession`. The UI uses only the actions; the route handler is unused by any client in this repo.
 3. **`inputClass`, `Field`, and `Row` are defined twice**, identically, in `SessionDetail.tsx` and `StrengthDetail.tsx`.
 4. **Two "is this a run?" idioms**: `isRunSession()` in `stats.ts` vs inline `s.type !== "Strength"` in `summary.ts`, `recap.ts`, `explain.ts`, `rebuild.ts`, `page.tsx`.
@@ -605,20 +605,16 @@ Ordered roughly by how much they'd bite.
 
 1. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
 
-2. **Duration is two different contracts in one field.** `SessionDetail` parses `mm:ss` via `parseMmSs`; `StrengthDetail` takes bare minutes through `Number()` with its own inline check and never uses `parseMmSs`. Both write `actual.durationMin`. A strength entry of "20:30" would be rejected as non-numeric; a run entry of "20" means 20 minutes in both, by coincidence.
+2. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
 
-3. **`StrengthDetail` swallows a failed save.** On error it sets the error message but leaves `editing` true and the optimistic `done` applied — recoverable, but the states diverge until the next render. `SessionDetail` handles the same case by keeping the form open too, so the pattern is at least consistent, just not obviously correct.
+3. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
 
-4. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
+4. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
 
-5. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
+5. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
 
-6. **`RECAP_MODEL`, `SUMMARY_MODEL`, `EXPLAIN_MODEL`, `REBUILD_MODEL` are four separate constants all set to `"claude-opus-4-8"`.** Independent tuning is the plausible intent, but a model bump means four edits with no shared default.
+6. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
 
-7. **Two locales for the same formatting intent**: `formatNiceDate` (`en-US`) and `formatDayShort` (`en-GB`). Both render short weekday + day + month; they differ only in ordering.
+7. **No timeouts on Anthropic calls — accepted, not fixed.** The SDK defaults to a 10-minute timeout with 2 retries, so the platform's `maxDuration` is the real ceiling. The cron's budget was raised from 60s to 300s, which removes the squeeze at the current two runners. Deliberately left without per-call timeouts: the platform already bounds the function, a slow call costs one day's progress note (the push is sent first, and notes are idempotent per date so the next morning writes a fresh one), and a timeout tight enough to matter would start killing adaptive-thinking calls that would otherwise succeed. Revisit when a third runner is added or if a `maxDuration` kill shows up in the logs.
 
-8. **Reduced motion is implemented four ways** (hook, Tailwind `motion-reduce:`, raw `matchMedia`, global CSS `@media`). All correct, none canonical.
-
-9. **No timeouts on Anthropic calls.** The cron's own comment identifies this as the reason push must go first, but the underlying risk (an unbounded model call inside a 60s function, once per runner) grows linearly with the number of runners.
-
-10. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.
+8. **`SessionDetail.tsx` and `StrengthDetail.tsx` duplicate `inputClass`, `Field`, and `Row`** character-for-character, and both use native `window.confirm` for destructive confirmation inside otherwise custom-designed UI.
