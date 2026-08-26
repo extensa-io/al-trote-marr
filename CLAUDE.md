@@ -22,6 +22,6 @@ Code that contradicts `CONTEXT.md` is drift: flag it, don't copy it.
 
 ## Maintaining these files
 
-Rules belong in `CONTEXT.md`, not here. This file is deliberately thin: it used to restate the stack, the hard rules, the design rules, the commands, and a file map, all of which `CONTEXT.md` now covers in more detail. That duplication drifted immediately: within a day of `CONTEXT.md` being written, this file was still telling agents to gate handlers with `await auth()` while the codebase had moved to `currentOwner()` in `lib/owner.ts`. Two copies of a rule means one of them is eventually wrong, so keep one.
+Rules belong in `CONTEXT.md`, not here. This file is deliberately thin.
 
 Add a rule to `CONTEXT.md` section 8. Update `CONTEXT.md` in the same change as the code, per its own Process rules.
