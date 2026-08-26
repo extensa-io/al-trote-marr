@@ -5,6 +5,7 @@ import { formatPace } from "@/lib/pace";
 import { formatNiceDate } from "@/lib/date";
 import PageHeader from "@/app/_components/PageHeader";
 import DailyReminderToggle from "./_components/DailyReminderToggle";
+import ContextEditor from "./_components/ContextEditor";
 
 export default async function Settings() {
   const session = await auth();
@@ -64,7 +65,20 @@ export default async function Settings() {
                 </li>
               ))}
             </ul>
+            {/* Provenance next to the numbers it describes: a zone table read off
+                a device means something different from one derived from a
+                formula, and nothing else on this screen says which it is. */}
+            {profile.zonesSource ? (
+              <p className="text-canvas-dim text-xs leading-relaxed mt-3 pt-3 border-t border-line">
+                {profile.zonesSource}
+              </p>
+            ) : null}
           </section>
+
+          <ContextEditor
+            trainingContext={profile.trainingContext ?? ""}
+            zonesSource={profile.zonesSource ?? ""}
+          />
         </>
       ) : (
         <section className="border border-line rounded-md p-6 text-center mb-4">

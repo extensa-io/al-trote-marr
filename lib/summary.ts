@@ -5,6 +5,7 @@ import {
   listSessions,
   upsertDailySummary,
 } from "./db";
+import { describeConstraints } from "./constraints";
 import { shiftDays } from "./date";
 import { responseText } from "./model";
 import { formatPace, paceSecPerKm } from "./pace";
@@ -62,9 +63,8 @@ export function buildSummaryPrompt(
   const { phase, progress } = phaseStatus(sessions, cutoff);
   if (phase) lines.push(`Current phase: ${phase}, ${formatPercent(progress)} through it.`);
 
-  if (profile.trainingContext) {
-    lines.push(`Runner's standing constraints: ${profile.trainingContext}`);
-  }
+  const constraints = describeConstraints(profile);
+  if (constraints) lines.push(`Runner's standing constraints: ${constraints}`);
 
   if (elapsed.length) {
     const overall = adherenceOverall(sessions, cutoff);

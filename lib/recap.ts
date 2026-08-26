@@ -5,6 +5,7 @@ import {
   listSessions,
   upsertDailySummary,
 } from "./db";
+import { describeConstraints } from "./constraints";
 import { responseText } from "./model";
 import { formatPace, paceSecPerKm } from "./pace";
 import { hrTargetForZone } from "./prescription";
@@ -104,9 +105,8 @@ export function buildRecapPrompt(
   const { phase, progress } = phaseStatus(sessions, runDate);
   if (phase) lines.push(`Current phase: ${phase}, ${formatPercent(progress)} through it.`);
 
-  if (profile.trainingContext) {
-    lines.push(`Runner's standing constraints: ${profile.trainingContext}`);
-  }
+  const constraints = describeConstraints(profile);
+  if (constraints) lines.push(`Runner's standing constraints: ${constraints}`);
 
   lines.push("");
   lines.push("The run just logged:");

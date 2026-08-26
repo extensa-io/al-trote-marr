@@ -95,9 +95,14 @@ export interface Profile {
   goalPaceSecPerKm: number;
   zones: Zone[];
   // Standing facts about how this runner trains that change how their numbers
-  // should be read, in the runner's own words. Injected into every AI prompt.
-  // The case it exists for: easy Z2 runs done as run/walk intervals, where
-  // average pace reflects the walk ratio rather than fitness, so a pace delta is
-  // not a fitness signal. Absent for a runner with nothing to declare.
+  // should be read, in the runner's own words. The first case was easy Z2 runs
+  // done as run/walk intervals, where average pace reflects the walk ratio
+  // rather than fitness, but it takes any such fact. Absent for a runner with
+  // nothing to declare.
   trainingContext?: string;
+  // Where `zones` came from, in a line: observed from a device, a lab test, or a
+  // formula. Provenance changes how hard a zone boundary should be treated, and
+  // it belongs next to the numbers it describes rather than buried in
+  // `trainingContext` prose, which is about how the runner trains.
+  zonesSource?: string;
 }

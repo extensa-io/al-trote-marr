@@ -16,6 +16,8 @@ export type ValidationResult<T> =
   | { ok: false; error: string };
 
 const NOTES_MAX = 500;
+const TRAINING_CONTEXT_MAX = 1000;
+const ZONES_SOURCE_MAX = 200;
 const HR_MIN = 30;
 const HR_MAX = 230;
 const WEIGHT_MIN = 30;
@@ -34,6 +36,35 @@ export function validateStatus(input: unknown): ValidationResult<Status> {
   if (typeof input !== "string" || !(VALID_STATUS as string[]).includes(input))
     return { ok: false, error: "invalid status" };
   return { ok: true, value: input as Status };
+}
+
+export interface ProfileContextInput {
+  trainingContext?: unknown;
+  zonesSource?: unknown;
+}
+
+// The two free-text profile fields that shape how the AI surfaces read the
+// runner's numbers. An empty string is a deliberate clear, not an omission, so
+// both are returned as strings and the caller decides between `$set` and
+// `$unset` — unlike `validateActual`, where empty means "leave alone".
+export function validateProfileContext(
+  input: ProfileContextInput
+): ValidationResult<{ trainingContext: string; zonesSource: string }> {
+  const field = (value: unknown, label: string, max: number): ValidationResult<string> => {
+    if (value === undefined || value === null) return { ok: true, value: "" };
+    if (typeof value !== "string") return { ok: false, error: `${label} must be text` };
+    const trimmed = value.trim();
+    if (trimmed.length > max)
+      return { ok: false, error: `${label} must be ${max} characters or fewer` };
+    return { ok: true, value: trimmed };
+  };
+
+  const training = field(input.trainingContext, "Training context", TRAINING_CONTEXT_MAX);
+  if (!training.ok) return training;
+  const zones = field(input.zonesSource, "Zone source", ZONES_SOURCE_MAX);
+  if (!zones.ok) return zones;
+
+  return { ok: true, value: { trainingContext: training.value, zonesSource: zones.value } };
 }
 
 export function validateActual(input: ActualInput): ValidationResult<Actual> {

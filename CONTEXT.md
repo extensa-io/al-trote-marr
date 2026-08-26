@@ -63,6 +63,7 @@ The client/server split is deliberate: everything that reads is a server compone
 | `lib/stats.ts` | Every dashboard formula as a pure function over `Session[]` + `Profile`. No I/O, no React. |
 | `lib/notify.ts` | Builds the push notification `{title, body}` from stats. Pure. |
 | `lib/push.ts` | `server-only`. VAPID configuration and `web-push` send, with expired-endpoint detection. |
+| `lib/constraints.ts` | Composes `profile.trainingContext` + `profile.zonesSource` into the one `Runner's standing constraints:` block every AI prompt injects. |
 | `lib/model.ts` | Shared Anthropic response handling: `responseText(response, feature)` concatenates the text blocks and throws `TruncatedResponseError` when `stop_reason === "max_tokens"`. Used by all four AI features. |
 | `lib/summary.ts` / `lib/recap.ts` / `lib/explain.ts` / `lib/rebuild.ts` | The four AI features. Each follows the same three-layer shape: `buildXPrompt` (pure), `generateX` (Anthropic call), `generateAndStoreX` / `getOrCreateX` (owner-scoped orchestration + persistence). |
 | `lib/plan-seed.ts` | Néstor's plan: profile, run sessions, and a generated strength schedule. Exports `generateStrengthSessions` for reuse. |
@@ -79,7 +80,7 @@ The client/server split is deliberate: everything that reads is a server compone
 
 - **Web**: `app/layout.tsx` → the five routes above.
 - **Cron**: `GET /api/cron/daily-notify`, scheduled by `vercel.json` at `0 11 * * *` and `0 12 * * *` (both UTC hours that can be 7:00 AM Toronto). An hour gate in the handler lets exactly one through. This is the only scheduled job.
-- **CLI**: `npm run ensure-indexes`, `npm run seed`, `npm run seed-lilo`, `npm run add-strength`, `npm run set-training-context`.
+- **CLI**: `npm run ensure-indexes`, `npm run seed`, `npm run seed-lilo`, `npm run add-strength`.
 - **Service worker**: `public/sw.js`, registered on demand by `DailyReminderToggle`, never by the app shell.
 
 ### Architectural decisions worth preserving
@@ -129,11 +130,16 @@ One document per training session (run or strength). Type: `Session` in `lib/typ
 
 One document per runner. Type: `Profile`.
 
-`{ ownerEmail, raceName, raceDate (YYYY-MM-DD), goal, baseline, maxHr, vo2, goalPaceSecPerKm, zones: Zone[], trainingContext? }`, where `Zone` is `{ z, name, min, max }` covering Z1..Z5.
+`{ ownerEmail, raceName, raceDate (YYYY-MM-DD), goal, baseline, maxHr, vo2, goalPaceSecPerKm, zones: Zone[], trainingContext?, zonesSource? }`, where `Zone` is `{ z, name, min, max }` covering Z1..Z5.
 
-`trainingContext` is optional free text: standing facts about how this runner trains that change how their numbers should be read, in their own words. It is injected into the recap and daily-note prompts, and the prompts are told that a metric a constraint explains is not a fitness signal. It exists because Néstor's easy Z2 runs are run/walk intervals (holding the Z2 cap requires walking breaks), which makes average pace on those runs a function of the walk ratio rather than of fitness; recaps were reading pace deltas there as progress. Per-runner, not global: another runner may do the same sessions continuously.
+**`trainingContext` and `zonesSource`** are the two optional free-text fields that tell the AI surfaces how to read this runner's numbers. Both are per-runner, never global, and both are composed into one `Runner's standing constraints:` prompt block by `describeConstraints` in `lib/constraints.ts`, so no prompt has to know about either field individually.
 
-No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$set}, {upsert:true})` from seed scripts, plus `setTrainingContext` for that one field. There is no profile editor in the UI, so `trainingContext` is set with `npm run set-training-context -- <owner-email> "<text>"`.
+- `trainingContext`: standing facts about **how this runner trains**, in their own words, where the fact changes what a metric means. Any such fact qualifies. The first two in use: easy Z2 runs done as run/walk intervals, which makes average pace on those runs a function of the walk ratio rather than of fitness, and the Z2 ceiling being a real physiological constraint rather than a discipline target.
+- `zonesSource`: **where the zone table came from**, in a line (a device, a lab test, a formula). Separate from `trainingContext` because provenance describes the `zones` array rather than the training, and it renders beside that table on `/settings`. A boundary observed on a device is a different kind of fact from one a formula produced, and nothing else in the schema records which it is.
+
+The prompts are told that a metric one of these explains is not a fitness signal. Both are edited in the **How your numbers are read** section of `/settings` (`ContextEditor` → `saveProfileContext` → `setProfileContext`), which is the only supported write path: a script existed first and was removed once the UI landed, because two write paths for one field is the drift this document warns about elsewhere. Saving affects future generations only; recaps already stored are not rewritten.
+
+No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$set}, {upsert:true})` from seed scripts, plus `setProfileContext` for the two free-text context fields. Everything else on the profile — race, goal, goal pace, max HR, the zone table — is seed-only and has no editor.
 
 ### `pushSubscriptions`
 
@@ -169,6 +175,7 @@ Only in `lib/validation.ts`, applied by `PATCH /api/sessions/[date]` and by the 
 
 - `status` ∈ `["planned","done","skipped"]`.
 - `km` > 0; `durationMin` > 0; `avgHr` ∈ [30, 230]; `weightKg` ∈ [30, 300]; `notes` ≤ 500 chars, trimmed.
+- `validateProfileContext`: `trainingContext` ≤ 1000 chars, `zonesSource` ≤ 200, both trimmed. Here an empty string means **clear the field**, not "omitted" — the opposite of `validateActual` — so `setProfileContext` `$unset`s it and the document never stores an empty value.
 - `testEffort` accepts `true` / `"true"` (stored) and `false` / `"false"` / empty (omitted); anything else is rejected. Never stored as `false`.
 - Empty string / `null` / `undefined` means "field omitted", not "invalid".
 - Numeric strings are accepted and coerced (`asFiniteNumber`), because form inputs send strings.
@@ -427,6 +434,7 @@ Currently only the two push endpoints are called from app code (`DailyReminderTo
 | `logActual(date, input)` | `actions/sessions.ts` | `ActionResult` (sets status `done`) |
 | `rescheduleRun(from, to, { swap? })` | `actions/sessions.ts` | `RescheduleResult` (may carry a `conflict`) |
 | `shiftWeek(week, deltaDays)` | `actions/sessions.ts` | `ShiftResult` |
+| `saveProfileContext({ trainingContext?, zonesSource? })` | `actions/profile.ts` | `ProfileContextResult` |
 | `generateRecap(date, { force? })` | `actions/recap.ts` | `RecapActionResult` (`force` re-bills, bypassing the `runUpdatedAt` check) |
 | `explainSession(date)` | `actions/explain.ts` | `ExplainActionResult` |
 | `previewPlanRebuild()` | `actions/rebuild.ts` | `PreviewResult` (no writes) |
@@ -593,7 +601,7 @@ Never make a new runner's seed destructive. `scripts/seed.ts` uses `deleteMany` 
 **AI features**
 - A new AI feature goes in its own `lib/<feature>.ts` and follows the established four-part shape: exported `*_MODEL` const, `SYSTEM_PROMPT`, pure `buildXPrompt`, `generateX`, and an owner-scoped idempotent `generateAndStoreX`.
 - Every AI output must be cached in a collection with an idempotency key (a date, or a content hash). State the key in a comment. The point is that generation is triggered by render: without a key, every visit to the page fires another call, so the content changes under the reader and the page blocks on work it didn't need. Cost is not the reason — a user-initiated regenerate button is fine and needs no guard.
-- A prompt that reads a runner's numbers must also read `profile.trainingContext` and be told that a metric a constraint explains is not a fitness signal. Constraints are per-runner data, never hardcoded in a prompt.
+- A prompt that reads a runner's numbers must also read their standing constraints via `describeConstraints`, and be told that a metric a constraint explains is not a fitness signal. Constraints are per-runner data, never hardcoded in a prompt. A new constraint field joins the same composed block rather than getting its own prompt line.
 - An AI surface must say something the screen doesn't already say. If a prompt's data is the same row the UI renders beside it, the output will restate it: compute the comparison, trend, or projection and put that in the prompt instead. Derived figures belong in `lib/stats.ts` as pure functions, never inline in the prompt builder.
 - Every system prompt ends with the standard voice clause: plain, warm, coach-like; no hype, no clichés, no emoji; ordinary running language only; never military, drill, or boot-camp vocabulary; no markdown.
 - A JSON response is constrained with `output_config.format` (a `json_schema`), not just asked for in the prompt. Schema subset rules: `additionalProperties: false`, a complete `required` list, no item counts or numeric ranges. Keep a defensive parse anyway — a schema doesn't cover refusals or truncation.

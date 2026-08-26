@@ -43,21 +43,29 @@ export async function getProfile(owner: string): Promise<Profile | null> {
   return db.collection<Profile>("profile").findOne({ ownerEmail: owner }, NO_ID);
 }
 
-// Set (or clear, with an empty string) the runner's standing constraints. There
-// is no profile editor in the UI yet, so this exists for the one-shot script.
-export async function setTrainingContext(
+// Set the runner's free-text context fields. An empty string clears the field
+// rather than storing one, so the document never carries an empty value. Only
+// the keys present in `patch` are touched.
+export async function setProfileContext(
   owner: string,
-  trainingContext: string
+  patch: { trainingContext?: string; zonesSource?: string }
 ): Promise<boolean> {
+  const set: Record<string, string> = {};
+  // `$unset` values are ignored by MongoDB but the driver's types require the
+  // literal, so this can't be a plain Record<string, string>.
+  const unset: Record<string, ""> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    if (value) set[key] = value;
+    else unset[key] = "";
+  }
+  if (Object.keys(set).length === 0 && Object.keys(unset).length === 0) return true;
+
   const db = await getDb();
-  const result = await db
-    .collection<Profile>("profile")
-    .updateOne(
-      { ownerEmail: owner },
-      trainingContext
-        ? { $set: { trainingContext } }
-        : { $unset: { trainingContext: "" } }
-    );
+  const result = await db.collection<Profile>("profile").updateOne({ ownerEmail: owner }, {
+    ...(Object.keys(set).length ? { $set: set } : {}),
+    ...(Object.keys(unset).length ? { $unset: unset } : {}),
+  });
   return result.matchedCount > 0;
 }
 
