@@ -9,7 +9,7 @@ interface Props {
 }
 
 const TRAINING_MAX = 1000;
-const ZONES_MAX = 200;
+const ZONES_MAX = 500;
 
 // Edits the two free-text fields the AI prompts read. Until this existed the
 // only way to set them was a terminal script with a database connection, which
@@ -63,14 +63,18 @@ export default function ContextEditor({ trainingContext, zonesSource }: Props) {
 
       <label className="block mb-4">
         <span className="eyebrow mb-1.5 block">Where your zones came from</span>
-        <input
+        <textarea
           value={zones}
           onChange={(e) => setZones(e.target.value)}
           maxLength={ZONES_MAX}
+          rows={5}
           disabled={pending}
           placeholder="e.g. observed from Garmin data, not formula-derived"
-          className="w-full bg-field border border-line rounded-md px-3 py-2 text-canvas text-sm focus:border-brass focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+          className="w-full bg-field border border-line rounded-md px-3 py-2 text-canvas text-sm leading-relaxed resize-none focus:border-brass focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
         />
+        <span className="font-mono text-canvas-dim text-[0.65rem] mt-1 block">
+          {zones.length}/{ZONES_MAX}
+        </span>
       </label>
 
       {error ? <p className="text-signal text-sm font-mono mb-3">{error}</p> : null}

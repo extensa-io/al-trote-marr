@@ -175,7 +175,7 @@ Only in `lib/validation.ts`, applied by `PATCH /api/sessions/[date]` and by the 
 
 - `status` ∈ `["planned","done","skipped"]`.
 - `km` > 0; `durationMin` > 0; `avgHr` ∈ [30, 230]; `weightKg` ∈ [30, 300]; `notes` ≤ 500 chars, trimmed.
-- `validateProfileContext`: `trainingContext` ≤ 1000 chars, `zonesSource` ≤ 200, both trimmed. Here an empty string means **clear the field**, not "omitted" — the opposite of `validateActual` — so `setProfileContext` `$unset`s it and the document never stores an empty value.
+- `validateProfileContext`: `trainingContext` ≤ 1000 chars, `zonesSource` ≤ 500, both trimmed. Here an empty string means **clear the field**, not "omitted" — the opposite of `validateActual` — so `setProfileContext` `$unset`s it and the document never stores an empty value.
 - `testEffort` accepts `true` / `"true"` (stored) and `false` / `"false"` / empty (omitted); anything else is rejected. Never stored as `false`.
 - Empty string / `null` / `undefined` means "field omitted", not "invalid".
 - Numeric strings are accepted and coerced (`asFiniteNumber`), because form inputs send strings.

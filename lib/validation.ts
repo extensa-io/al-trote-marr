@@ -17,7 +17,7 @@ export type ValidationResult<T> =
 
 const NOTES_MAX = 500;
 const TRAINING_CONTEXT_MAX = 1000;
-const ZONES_SOURCE_MAX = 200;
+const ZONES_SOURCE_MAX = 500;
 const HR_MIN = 30;
 const HR_MAX = 230;
 const WEIGHT_MIN = 30;
