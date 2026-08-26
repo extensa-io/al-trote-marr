@@ -7,9 +7,9 @@ import {
   aerobicEfficiency,
   countdown,
   cumulativeKm,
-  estimatedFinish,
   longRunProgression,
   phaseStatus,
+  raceProjections,
   streak,
   weeklyVolume,
   weightTrend,
@@ -64,7 +64,7 @@ export default async function Dashboard() {
           <ZoneAdherenceCard data={zoneAdherence(sessions, profile)} />
           <AerobicEfficiencyChart data={aerobicEfficiency(sessions)} />
           <WeightChart data={weightTrend(sessions)} />
-          <EstimatedFinishCard data={estimatedFinish(sessions)} />
+          <EstimatedFinishCard data={raceProjections(sessions, today)} />
         </div>
       )}
     </main>

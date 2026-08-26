@@ -34,6 +34,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
   const [durationDigits, setDurationDigits] = useState("");
   const [weight, setWeight] = useState("");
   const [notes, setNotes] = useState("");
+  const [testEffort, setTestEffort] = useState(false);
 
   const [rescheduling, setRescheduling] = useState(false);
   const [moveDate, setMoveDate] = useState("");
@@ -83,6 +84,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
     setDurationDigits("");
     setWeight("");
     setNotes("");
+    setTestEffort(false);
     setError(null);
     setEditing(true);
   }
@@ -97,6 +99,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
     );
     setWeight(optimistic.actual?.weightKg?.toString() ?? "");
     setNotes(optimistic.actual?.notes ?? "");
+    setTestEffort(optimistic.actual?.testEffort === true);
     setError(null);
     setEditing(true);
   }
@@ -136,6 +139,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
       durationMin: parsedDuration ?? undefined,
       weightKg: weight.trim() === "" ? undefined : Number(weight),
       notes: notes.trim() === "" ? undefined : notes.trim(),
+      testEffort: testEffort ? true : undefined,
     };
 
     startTransition(async () => {
@@ -146,6 +150,7 @@ export default function SessionDetail({ session, hrTarget }: Props) {
         durationMin: parsedDuration,
         weightKg: weight.trim() === "" ? undefined : weight,
         notes: notes.trim() === "" ? undefined : notes.trim(),
+        testEffort: testEffort ? true : undefined,
       });
       if (!result.ok) {
         setError(result.error);
@@ -194,6 +199,13 @@ export default function SessionDetail({ session, hrTarget }: Props) {
 
       {status !== "planned" && actual && !editing ? (
         <dl className="grid grid-cols-2 gap-y-2 gap-x-4 font-mono text-sm mb-4">
+          {actual.testEffort && (
+            <div className="col-span-2">
+              <span className="font-display uppercase tracking-wider text-brass text-xs">
+                Test effort
+              </span>
+            </div>
+          )}
           {actual.km != null && (
             <Row label="Distance" value={`${actual.km} km`} />
           )}
@@ -268,6 +280,27 @@ export default function SessionDetail({ session, hrTarget }: Props) {
               placeholder="How did it feel?"
             />
           </Field>
+          {/* Marks the run as a fitness test rather than the prescribed session:
+              it anchors the speed projection and drops out of the easy-run
+              metrics, where a hard effort would read as a fitness drop. */}
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={testEffort}
+              onChange={(e) => setTestEffort(e.target.checked)}
+              disabled={pending}
+              className="mt-0.5 size-4 shrink-0 accent-brass focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass"
+            />
+            <span>
+              <span className="font-display uppercase tracking-wider text-canvas text-xs">
+                Test effort
+              </span>
+              <span className="block text-canvas-dim text-xs leading-relaxed mt-0.5">
+                A hard run to measure fitness. Sets your projected finish and stays out of your
+                easy-run stats.
+              </span>
+            </span>
+          </label>
           {error ? <p className="text-signal text-sm font-mono">{error}</p> : null}
           <div className="flex gap-2">
             <button

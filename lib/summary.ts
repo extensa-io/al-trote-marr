@@ -6,6 +6,7 @@ import {
   upsertDailySummary,
 } from "./db";
 import { shiftDays } from "./date";
+import { responseText } from "./model";
 import { formatPace, paceSecPerKm } from "./pace";
 import {
   adherence4wk,
@@ -26,7 +27,9 @@ const SYSTEM_PROMPT = `You write a short daily progress note for one runner trai
 
 Write 4 to 6 sentences in English. Cover where they stand in the plan, how their recent training has gone (adherence, volume versus plan, aerobic trend, easy-day discipline), and one specific, actionable thing to focus on next. Ground every claim in the numbers provided; do not invent data. If recent logs include the runner's own notes, weave in what they reveal (how a session felt, niggles, conditions).
 
-Voice: plain, warm, and encouraging, like a knowledgeable coach. No hype, no clichés, no emoji. Use ordinary running language only: never use military, drill, or boot-camp vocabulary. Output the note as plain prose with no heading, no bullet points, and no markdown.`;
+Respect the runner's standing constraints when they are given. If a constraint explains a metric, that metric is not a fitness signal and must not be presented as one: easy runs done as run/walk intervals to hold a heart-rate cap make average pace a function of the walk ratio rather than of fitness, for instance.
+
+Voice: plain, warm, and encouraging, like a knowledgeable coach. No hype, no clichés, no emoji. Use ordinary running language only: never use military, drill, or boot-camp vocabulary. British spelling throughout. Output the note as plain prose with no heading, no bullet points, no markdown, and no em dashes or en dashes.`;
 
 // Assembles the data context the model writes from. `today` is YYYY-MM-DD in
 // America/Toronto. Returns null when there is not enough to say anything useful.
@@ -58,6 +61,10 @@ export function buildSummaryPrompt(
 
   const { phase, progress } = phaseStatus(sessions, cutoff);
   if (phase) lines.push(`Current phase: ${phase}, ${formatPercent(progress)} through it.`);
+
+  if (profile.trainingContext) {
+    lines.push(`Runner's standing constraints: ${profile.trainingContext}`);
+  }
 
   if (elapsed.length) {
     const overall = adherenceOverall(sessions, cutoff);
@@ -125,8 +132,8 @@ export function buildSummaryPrompt(
   return lines.join("\n");
 }
 
-// Calls Claude to produce the note. Throws if ANTHROPIC_API_KEY is missing or
-// the API call fails; callers handle that per owner.
+// Calls Claude to produce the note. Throws if ANTHROPIC_API_KEY is missing, the
+// API call fails, or the response was truncated; callers handle that per owner.
 export async function generateDailySummary(
   sessions: Session[],
   profile: Profile,
@@ -138,20 +145,17 @@ export async function generateDailySummary(
   const client = new Anthropic();
   const response = await client.messages.create({
     model: SUMMARY_MODEL,
-    max_tokens: 1024,
+    // Shared with adaptive thinking, so 1024 could return a note cut off
+    // mid-sentence. 2048 is the cheap margin over the 4-to-6 sentences asked
+    // for; a truncated response is rejected outright below.
+    max_tokens: 2048,
     thinking: { type: "adaptive" },
     output_config: { effort: "low" },
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-
-  return text || null;
+  return responseText(response, "summary") || null;
 }
 
 export type SummaryOutcome =

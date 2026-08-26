@@ -1,3 +1,4 @@
+import RecapRewriteButton from "@/app/_components/RecapRewriteButton";
 import type { DailySummary } from "@/lib/types";
 
 interface Props {
@@ -22,6 +23,8 @@ export default function RunRecap({ entry, isRace }: Props) {
       {suggestions.length > 0 && (
         <RecapList label="Suggestions" items={suggestions} />
       )}
+
+      <RecapRewriteButton date={entry.date} />
     </section>
   );
 }

@@ -10,7 +10,8 @@
     "ensure-indexes": "node --env-file=.env.local --import tsx scripts/ensure-indexes.ts",
     "seed": "node --env-file=.env.local --import tsx scripts/seed.ts",
     "add-strength": "node --env-file=.env.local --import tsx scripts/add-strength.ts",
-    "seed-lilo": "node --env-file=.env.local --import tsx scripts/seed-lilo.ts"
+    "seed-lilo": "node --env-file=.env.local --import tsx scripts/seed-lilo.ts",
+    "set-training-context": "node --env-file=.env.local --import tsx scripts/set-training-context.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",

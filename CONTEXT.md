@@ -63,6 +63,7 @@ The client/server split is deliberate: everything that reads is a server compone
 | `lib/stats.ts` | Every dashboard formula as a pure function over `Session[]` + `Profile`. No I/O, no React. |
 | `lib/notify.ts` | Builds the push notification `{title, body}` from stats. Pure. |
 | `lib/push.ts` | `server-only`. VAPID configuration and `web-push` send, with expired-endpoint detection. |
+| `lib/model.ts` | Shared Anthropic response handling: `responseText(response, feature)` concatenates the text blocks and throws `TruncatedResponseError` when `stop_reason === "max_tokens"`. Used by all four AI features. |
 | `lib/summary.ts` / `lib/recap.ts` / `lib/explain.ts` / `lib/rebuild.ts` | The four AI features. Each follows the same three-layer shape: `buildXPrompt` (pure), `generateX` (Anthropic call), `generateAndStoreX` / `getOrCreateX` (owner-scoped orchestration + persistence). |
 | `lib/plan-seed.ts` | Néstor's plan: profile, run sessions, and a generated strength schedule. Exports `generateStrengthSessions` for reuse. |
 | `lib/plan-seed-lilo.ts` | Lilo's plan, reusing `generateStrengthSessions` from the primary seed. |
@@ -78,7 +79,7 @@ The client/server split is deliberate: everything that reads is a server compone
 
 - **Web**: `app/layout.tsx` → the five routes above.
 - **Cron**: `GET /api/cron/daily-notify`, scheduled by `vercel.json` at `0 11 * * *` and `0 12 * * *` (both UTC hours that can be 7:00 AM Toronto). An hour gate in the handler lets exactly one through. This is the only scheduled job.
-- **CLI**: `npm run ensure-indexes`, `npm run seed`, `npm run seed-lilo`, `npm run add-strength`.
+- **CLI**: `npm run ensure-indexes`, `npm run seed`, `npm run seed-lilo`, `npm run add-strength`, `npm run set-training-context`.
 - **Service worker**: `public/sw.js`, registered on demand by `DailyReminderToggle`, never by the app shell.
 
 ### Architectural decisions worth preserving
@@ -113,10 +114,12 @@ One document per training session (run or strength). Type: `Session` in `lib/typ
 | `plannedKm` | number | yes | `0` for Strength. |
 | `exercises` | `StrengthExercise[]` | no | Strength only. `{ name, detail }`. |
 | `status` | `"planned"\|"done"\|"skipped"` | yes | Seeded as `planned`. |
-| `actual` | `Actual` | no | `{ km?, avgHr?, durationMin?, weightKg?, notes? }`. |
+| `actual` | `Actual` | no | `{ km?, avgHr?, durationMin?, weightKg?, notes?, testEffort? }`. |
 | `updatedAt` | string | no | ISO timestamp. Absent until first write. Doubles as the recap staleness key. |
 
 **Index:** `{ ownerEmail: 1, date: 1 }` unique. Created idempotently by `scripts/seed.ts`, `scripts/seed-lilo.ts`, and `scripts/add-strength.ts`.
+
+**`actual.testEffort`** marks the run as a deliberate fitness test rather than the prescribed session. It is stored only when `true` (an absent flag and an explicit `false` mean the same thing). It lives on `actual`, not on `Session.type`, because it describes what was *run*, not what was *planned*: the runner decides at log time, no session type or title has to be editable, and the rebuild's protected-type list stays untouched. What it changes is entirely in `lib/stats.ts` — see `isTestEffort` in the stat rules.
 
 **Modelling choice:** `actual` is embedded, not referenced. There is exactly one log per session, always read with the session, never queried independently — embedding is correct and the document stays tiny. `exercises` is likewise a bounded (5-8 item) embedded array on strength days only. `zones` is embedded in `profile` for the same reason.
 
@@ -126,9 +129,11 @@ One document per training session (run or strength). Type: `Session` in `lib/typ
 
 One document per runner. Type: `Profile`.
 
-`{ ownerEmail, raceName, raceDate (YYYY-MM-DD), goal, baseline, maxHr, vo2, goalPaceSecPerKm, zones: Zone[] }`, where `Zone` is `{ z, name, min, max }` covering Z1..Z5.
+`{ ownerEmail, raceName, raceDate (YYYY-MM-DD), goal, baseline, maxHr, vo2, goalPaceSecPerKm, zones: Zone[], trainingContext? }`, where `Zone` is `{ z, name, min, max }` covering Z1..Z5.
 
-No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$set}, {upsert:true})` from seed scripts only.
+`trainingContext` is optional free text: standing facts about how this runner trains that change how their numbers should be read, in their own words. It is injected into the recap and daily-note prompts, and the prompts are told that a metric a constraint explains is not a fitness signal. It exists because Néstor's easy Z2 runs are run/walk intervals (holding the Z2 cap requires walking breaks), which makes average pace on those runs a function of the walk ratio rather than of fitness; recaps were reading pace deltas there as progress. Per-runner, not global: another runner may do the same sessions continuously.
+
+No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$set}, {upsert:true})` from seed scripts, plus `setTrainingContext` for that one field. There is no profile editor in the UI, so `trainingContext` is set with `npm run set-training-context -- <owner-email> "<text>"`.
 
 ### `pushSubscriptions`
 
@@ -164,6 +169,7 @@ Only in `lib/validation.ts`, applied by `PATCH /api/sessions/[date]` and by the 
 
 - `status` ∈ `["planned","done","skipped"]`.
 - `km` > 0; `durationMin` > 0; `avgHr` ∈ [30, 230]; `weightKg` ∈ [30, 300]; `notes` ≤ 500 chars, trimmed.
+- `testEffort` accepts `true` / `"true"` (stored) and `false` / `"false"` / empty (omitted); anything else is rejected. Never stored as `false`.
 - Empty string / `null` / `undefined` means "field omitted", not "invalid".
 - Numeric strings are accepted and coerced (`asFiniteNumber`), because form inputs send strings.
 
@@ -187,12 +193,14 @@ Every protected page repeats the same three lines: `await auth()`, `redirect("/s
 
 ### Logging a run
 
-1. `SessionDetail` (client) collects km, avg HR, duration, weight, notes. Duration comes from the shared `DurationField`: a digit stream read right to left, so `2845` is 28:45 and `12832` is 1:28:32. A mobile numeric keypad exposes no colon, and a minutes-only field would force the runner to convert an hour-plus run by hand; digits-only avoids both.
+1. `SessionDetail` (client) collects km, avg HR, duration, weight, notes, and a **Test effort** checkbox. Duration comes from the shared `DurationField`: a digit stream read right to left, so `2845` is 28:45 and `12832` is 1:28:32. A mobile numeric keypad exposes no colon, and a minutes-only field would force the runner to convert an hour-plus run by hand; digits-only avoids both.
 2. `useOptimistic` applies the patch immediately; `logActual(date, input)` runs in a transition.
 3. The action re-derives `owner` from the session, validates via `validateActual`, and calls `updateSession(owner, date, { status: "done", actual })`.
 4. `updateSession` always sets `updatedAt` to now, `$set`s only the provided keys, and re-reads the doc to return it.
 5. `revalidateAll(date)` revalidates `/`, `/plan`, `/plan/[date]`.
 6. On the home page's next render, today's run is `done` and no recap matches its `updatedAt`, so `RecapGenerator` mounts and fires the recap flow (below).
+
+**Test effort.** Ticking the box sets `actual.testEffort`, which makes the run anchor the speed-based race projection and drop out of every easy-run metric. It exists because a plan of Z2-capped run/walk sessions gives no read on race fitness: the speed basis had never once fired, so every projection came off a single long run. The card shows a "Test effort" label on a logged run so the flag is visible after the fact, and the recap prompt is told to judge the run as a benchmark rather than against the prescription.
 
 **Rule:** re-logging or changing the status of an already-`done` session prompts a `window.confirm` first (both `SessionDetail` and `StrengthDetail`). Client-side guard only; the server permits it.
 
@@ -240,7 +248,17 @@ Strength sessions are excluded from the running note entirely.
 
 Triggered by render, not by the write. `app/page.tsx` computes `recapFresh = summary.kind === "recap" && summary.runUpdatedAt === todayRun.updatedAt`. When today's run is `done` and the recap isn't fresh, it renders `RecapGenerator`, which fires `generateRecap(date)` on mount (guarded by a `useRef` against React's dev double-invoke) and shows a placeholder until `revalidatePath("/")` swaps in `RunRecap`.
 
-`generateAndStoreRecap` refuses non-runs, missing sessions, and anything not `done`. It short-circuits to `"exists"` when a stored recap's `runUpdatedAt` matches. The model returns strict JSON; `parseRecap` strips a possible code fence and falls back to treating the whole response as the recap text with empty lists.
+`generateAndStoreRecap` refuses non-runs, missing sessions, and anything not `done`. It short-circuits to `"exists"` when a stored recap's `runUpdatedAt` matches. The response shape is enforced by the API, not requested in prose: `output_config.format` carries `RECAP_SCHEMA` as a `json_schema`, so a reply that isn't the recap object cannot come back. Array item counts ("2 to 4 insights") stay in the prompt because the schema subset doesn't support them, and `additionalProperties: false` plus a complete `required` list are mandatory. The parse below is kept as defence for the cases a schema can't cover: a refusal, a `max_tokens` truncation, or an empty `recap` string.
+
+`parseRecap` strips a possible code fence, pulls the first *balanced* JSON object out of the response with `extractJsonObject` (brace-counting that skips braces inside strings and honours escapes), and returns `null` for anything that isn't an object with a non-empty `recap` string, which makes `generateRecap` throw. Tolerant about what surrounds the object, strict about the object itself: a "Here is the recap:" preamble cost a whole generation before the extractor existed. A parse failure carries the first 300 characters of the response into the error message, because a log saying only that parsing failed gives nothing to fix. **There is no plain-text fallback, deliberately:** the original one stored the whole raw response as the recap text, so a single truncated reply put a raw JSON object on the home screen, and the `runUpdatedAt` idempotency key kept serving it. A failed parse is now a failed call — nothing is written and the UI offers a retry.
+
+**The prompt's `DERIVED CONTEXT` block is the point of the feature.** The card above the recap already shows distance, duration, pace, heart rate, and the zone target, so a recap built from the logged row alone can only restate them — which is what it did, producing notes like "you covered 5.54 km at 9:35/km and kept your heart rate inside the Z2 target." `buildRecapPrompt` therefore appends computed figures the model cannot derive reliably on its own: pace delta versus recent same-type runs, the same-type efficiency trend, 7/28-day load and its ratio, the longest run to date, and both race projections against goal pace. `SYSTEM_PROMPT` forbids stating this run's distance, duration, pace, or heart rate as a bare fact and requires every insight to carry a comparison, a trend, or a projection. When adding a figure to the prompt, add the derived form, not the raw one.
+
+The prompt also carries a `Projection movement since the last logged run` line, because each recap is generated in isolation and without it the loudest standing figure (an unchanged race projection) gets presented as news every day. A projection that moved less than 30 seconds is labelled "not news" and the prompt tells the model to lead with what did move.
+
+For the same reason the prompt carries an `ALREADY TOLD THE RUNNER` section: `generateAndStoreRecap` reads the recap stored for the previous logged run and passes it to `buildRecapPrompt` (which stays pure, taking it as an argument). Standing facts may be referred to once as context but must not lead or fill more than one insight. Without it, five consecutive recaps all opened with the same unchanged projection and the same long-run gap.
+
+`RunRecap` carries a `RecapRewriteButton` (client) that calls `generateRecap(date, { force: true })`, bypassing the `runUpdatedAt` check. It is the only way to replace a stored recap without editing the logged run, and it re-bills one model call per press.
 
 Recaps are visible on any past day's `/plan/[date]`, not just today.
 
@@ -267,7 +285,13 @@ Two steps, both auth-checked server actions.
 - `adherence4wk`: inclusive 28-day window, `shiftDays(today, -27)`.
 - `zoneAdherence`: among `done` runs of type Easy/Long/Kickoff/Shakeout with `avgHr`, the share with `avgHr <= Z2.max`. `null` when there's no Z2 or no data.
 - `aerobicEfficiency`: `(km*1000 / (durationMin*60)) / avgHr`, m/s per bpm, same easy-type filter, needs all three fields.
-- `estimatedFinish`: latest `done` session of type `Quality` **or** whose title matches `/goal pace/i`, with km and duration; pace scaled to `21.0975` km.
+- `raceProjections`: Riegel scaling, `T2 = T1 × (D2/D1)^1.06`, to `RACE_DISTANCE_KM` (21.0975). Returns up to two projections from the 42 days ending `asOf` — `"speed"` from a `Quality` or `/goal pace/i` run of ≥3 km, `"endurance"` from a `Long` run of ≥8 km — picking the fastest projected finish per basis. **Flat pace extrapolation is not used anywhere:** it ignores that pace decays with distance, so it flattered a 6 km tempo into a race time the runner has no evidence for. The two bases normally disagree and the gap is the point: fast speed projection with a slow endurance one means distance, not turnover, is the limiter. Both surfaces (dashboard card, recap prompt) read this one function.
+- `paceVsRecentSameType`: this run's pace against the mean and best of the last 5 `done` runs of the same type. Negative delta is faster.
+- `efficiencyTrend`: this run's `aerobicEfficiency` against the mean of the previous 6 runs **of the same type**. Same-type only because pooling a 5 km easy run with a 14 km long run makes the comparison swing on window composition rather than fitness — `aerobicEfficiency` itself still pools easy types for the dashboard trend line.
+- `rollingVolume`: `done` km in the inclusive 7- and 28-day windows ending `date`, plus the acute-to-chronic ratio (7-day vs the 28-day weekly average). Above ~1.5 is a fast ramp.
+- `longestCompletedRun`: furthest single `done` run on or before `date`.
+- `isTestEffort` (`actual.testEffort === true`): a deliberate hard run logged to measure fitness. **Included** in the `"speed"` projection basis whatever the session's type, and **excluded** from `zoneAdherence`, `aerobicEfficiency`, `efficiencyTrend`, `paceVsRecentSameType` (both the run itself and the prior pool), and the `"endurance"` basis. Still counted by `adherence*`, `streak`, `weeklyVolume`, `rollingVolume`, `cumulativeKm`, and `longestCompletedRun`. The exclusions exist because a maximal effort otherwise reads as broken zone discipline or a collapse in aerobic efficiency; the endurance exclusion exists because that basis extrapolates from an aerobic pace, and a hard effort would inflate it into a projection with no aerobic evidence behind it.
+- `MIN_COMPARABLE_KM` (1 km): below this a logged session is a marker, not a run (a travel day ticked off, a walk, an abandoned start). Excluded from `aerobicEfficiency`, `paceVsRecentSameType`, and `efficiencyTrend`, because comparing a one-minute log to real runs produces confident nonsense. It still counts as `done` for adherence and volume, and the recap prompt says explicitly that such a log is a marker.
 - `cumulativeKm` emits `actual: null` until the first logged run, so the chart line starts where data starts rather than at zero.
 - Every function returns `0`, `null`, or `[]` rather than dividing by zero.
 
@@ -275,7 +299,7 @@ Two steps, both auth-checked server actions.
 
 - **Server actions never throw to the client.** They return `{ ok: false, error }` (or a `conflict` variant), logging the real cause with `console.error`. The rationale, repeated in comments: the client can offer a retry instead of spinning.
 - **Route handlers** return `Response.json({ error }, { status })` with lowercase messages: `401 unauthorized`, `400` validation messages, `404 not found` / `no plan`, `409` for "no subscription on this device".
-- **AI library functions throw**; their orchestrators or callers catch.
+- **AI library functions throw**; their orchestrators or callers catch. A response whose `stop_reason` is `max_tokens` counts as a failure, not an answer: `responseText` in `lib/model.ts` throws on it, so a half-written note, paragraph, or JSON object is never stored.
 - **Dev-only routes** (`/api/dev/*`) return 404 when `NODE_ENV === "production"` — checked before `auth()`.
 - **Pages** use `notFound()` for a bad date or missing session, and `redirect("/signin")` for no session. `app/error.tsx` shows `error.digest` when present, the raw message otherwise.
 
@@ -393,6 +417,7 @@ Currently only the two push endpoints are called from app code (`DailyReminderTo
 |---|---|---|
 | POST | `/api/dev/notify` | Send today's reminder to the signed-in user's devices now. 409 if no subscription on this device. |
 | POST | `/api/dev/summary` | Force-regenerate today's summary for the signed-in runner. |
+| POST | `/api/dev/recap` | Force-regenerate recaps for past logged runs: `?dates=YYYY-MM-DD,…` or `?last=N` (default 1, max 10 dates). Sequential, one model call per date, replaces whatever is stored. |
 
 ### Server actions (the real mutation surface)
 
@@ -402,7 +427,7 @@ Currently only the two push endpoints are called from app code (`DailyReminderTo
 | `logActual(date, input)` | `actions/sessions.ts` | `ActionResult` (sets status `done`) |
 | `rescheduleRun(from, to, { swap? })` | `actions/sessions.ts` | `RescheduleResult` (may carry a `conflict`) |
 | `shiftWeek(week, deltaDays)` | `actions/sessions.ts` | `ShiftResult` |
-| `generateRecap(date)` | `actions/recap.ts` | `RecapActionResult` |
+| `generateRecap(date, { force? })` | `actions/recap.ts` | `RecapActionResult` (`force` re-bills, bypassing the `runUpdatedAt` check) |
 | `explainSession(date)` | `actions/explain.ts` | `ExplainActionResult` |
 | `previewPlanRebuild()` | `actions/rebuild.ts` | `PreviewResult` (no writes) |
 | `applyPlanRebuild(proposal)` | `actions/rebuild.ts` | `ApplyResult` |
@@ -443,7 +468,7 @@ There are no queues, no workers, no background jobs, no retry policies.
 |---|---|---|
 | **MongoDB Atlas** | everything | 5s server-selection/connect timeouts; a failed connect evicts the cached promise so the next request retries rather than re-awaiting a poisoned slot. Errors bubble to `app/error.tsx`. |
 | **Google OAuth** (Auth.js) | sign-in | Non-allowlisted email → `signIn` returns `false` → Auth.js error page. |
-| **Anthropic API** | summary, recap, explanation, rebuild | Library functions throw. Cron catches per owner and records `"error"`. Server actions catch and return `{ ok: false }`; the UI shows a "Try again" affordance. **No retries, no timeout, no fallback model.** Malformed JSON falls back to a degraded parse (recap) or `null` (rebuild → `"no-data"`). |
+| **Anthropic API** | summary, recap, explanation, rebuild | Library functions throw. Cron catches per owner and records `"error"`. Server actions catch and return `{ ok: false }`; the UI shows a "Try again" affordance. **No retries, no timeout, no fallback model.** A truncated response (`stop_reason: "max_tokens"`) throws. Malformed JSON throws (recap) or yields `null` (rebuild → `"no-data"`); nothing degraded is ever stored. |
 | **Web Push (VAPID)** | daily reminder | `configure()` throws once if any VAPID var is missing; the cron catches it and reports `push.error` in the body. Per-send 404/410 prunes the endpoint. Any other send error is counted as not-sent and silently dropped. `normalizeSubject` coerces a bare email to `mailto:`. |
 | **Vercel Cron** | the daily job | No delivery guarantee is assumed; nothing depends on exactly-once. |
 
@@ -501,7 +526,7 @@ Root font size is `112.5%` (16px → 18px) so the whole rem-based scale moves to
 - Status reads through colour plus a short text label, never icons-as-decoration.
 - A fixed bottom tab bar (Today / Plan / Dashboard) with safe-area padding; hidden on `/signin`.
 
-**Copy.** Plain verbs, sentence case, no filler. A button says what it does and keeps that word through the flow. Empty states say what to do next. Errors say what happened and how to fix it — never apologise, never go vague. No themed, military, or "drill" vocabulary anywhere in UI text, identifiers, or comments; the app name is the sole exception, and everything around it must read as an ordinary running app.
+**Copy.** British spelling throughout ("prioritise", "metres"), in UI text and in AI-generated copy; every system prompt states it. No em dashes or en dashes in prose, in either: commas, semicolons, or a shorter sentence. Plain verbs, sentence case, no filler. A button says what it does and keeps that word through the flow. Empty states say what to do next. Errors say what happened and how to fix it — never apologise, never go vague. No themed, military, or "drill" vocabulary anywhere in UI text, identifiers, or comments; the app name is the sole exception, and everything around it must read as an ordinary running app.
 
 **Quality floor — every screen, no exceptions.** Layout holds from 360px wide. Keyboard focus is always visible (the standard `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brass`). `prefers-reduced-motion` is respected. Contrast holds against the dark field. Animation is optional and quiet; a subtle state transition beats scattered effects.
 
@@ -567,9 +592,13 @@ Never make a new runner's seed destructive. `scripts/seed.ts` uses `deleteMany` 
 
 **AI features**
 - A new AI feature goes in its own `lib/<feature>.ts` and follows the established four-part shape: exported `*_MODEL` const, `SYSTEM_PROMPT`, pure `buildXPrompt`, `generateX`, and an owner-scoped idempotent `generateAndStoreX`.
-- Every AI output must be cached in a collection with an idempotency key (a date, or a content hash) so re-renders never re-bill. State the key in a comment.
+- Every AI output must be cached in a collection with an idempotency key (a date, or a content hash). State the key in a comment. The point is that generation is triggered by render: without a key, every visit to the page fires another call, so the content changes under the reader and the page blocks on work it didn't need. Cost is not the reason — a user-initiated regenerate button is fine and needs no guard.
+- A prompt that reads a runner's numbers must also read `profile.trainingContext` and be told that a metric a constraint explains is not a fitness signal. Constraints are per-runner data, never hardcoded in a prompt.
+- An AI surface must say something the screen doesn't already say. If a prompt's data is the same row the UI renders beside it, the output will restate it: compute the comparison, trend, or projection and put that in the prompt instead. Derived figures belong in `lib/stats.ts` as pure functions, never inline in the prompt builder.
 - Every system prompt ends with the standard voice clause: plain, warm, coach-like; no hype, no clichés, no emoji; ordinary running language only; never military, drill, or boot-camp vocabulary; no markdown.
-- JSON responses are unfenced and parsed tolerantly with a defined fallback. Never assume well-formed output.
+- A JSON response is constrained with `output_config.format` (a `json_schema`), not just asked for in the prompt. Schema subset rules: `additionalProperties: false`, a complete `required` list, no item counts or numeric ranges. Keep a defensive parse anyway — a schema doesn't cover refusals or truncation.
+- JSON responses are unfenced and parsed defensively. Never assume well-formed output — and never fall back to storing the raw response. A parse that fails, or a `max_tokens` truncation, is a failed call: throw, write nothing, let the caller's error path show a retry. Route every response through `responseText` from `lib/model.ts`.
+- `max_tokens` is shared with adaptive thinking. Budget for both, not just the visible answer.
 - Model calls have no timeout today. If you add a feature to the cron path, it goes **after** the push send, or you add a timeout.
 
 **UI** — the design system in section 7.5 is binding; these are the enforcement rules.

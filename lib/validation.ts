@@ -8,6 +8,7 @@ export interface ActualInput {
   durationMin?: unknown;
   weightKg?: unknown;
   notes?: unknown;
+  testEffort?: unknown;
 }
 
 export type ValidationResult<T> =
@@ -72,6 +73,20 @@ export function validateActual(input: ActualInput): ValidationResult<Actual> {
     if (trimmed.length > NOTES_MAX)
       return { ok: false, error: `notes must be ${NOTES_MAX} characters or fewer` };
     if (trimmed.length > 0) out.notes = trimmed;
+  }
+
+  // Only ever stored when true: an absent flag and an explicit false mean the
+  // same thing, and omitting it keeps the stored document clean.
+  if (input.testEffort === true || input.testEffort === "true") {
+    out.testEffort = true;
+  } else if (
+    input.testEffort !== undefined &&
+    input.testEffort !== null &&
+    input.testEffort !== "" &&
+    input.testEffort !== false &&
+    input.testEffort !== "false"
+  ) {
+    return { ok: false, error: "testEffort must be a boolean" };
   }
 
   return { ok: true, value: out };

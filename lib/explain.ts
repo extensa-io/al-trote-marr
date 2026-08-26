@@ -6,6 +6,7 @@ import {
   getSessionExplanation,
   upsertSessionExplanation,
 } from "./db";
+import { responseText } from "./model";
 import { formatPace } from "./pace";
 import type { Profile, Session } from "./types";
 
@@ -61,7 +62,8 @@ function clean(text: string): string {
 }
 
 // Calls Claude to produce the explanation paragraph. Throws if
-// ANTHROPIC_API_KEY is missing or the API call fails; callers handle that.
+// ANTHROPIC_API_KEY is missing, the API call fails, or the response was
+// truncated; callers handle that.
 export async function generateExplanation(
   session: Session,
   profile: Profile
@@ -72,19 +74,17 @@ export async function generateExplanation(
   const client = new Anthropic();
   const response = await client.messages.create({
     model: EXPLAIN_MODEL,
-    max_tokens: 512,
+    // Shared with adaptive thinking: 512 left almost nothing for the paragraph
+    // itself once the model thought about the prescription. A truncated
+    // response is rejected outright below.
+    max_tokens: 1024,
     thinking: { type: "adaptive" },
     output_config: { effort: "low" },
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-
+  const text = responseText(response, "explain");
   return text ? clean(text) : null;
 }
 

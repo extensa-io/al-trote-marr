@@ -6,6 +6,7 @@ import {
   type RebuildUpdate,
 } from "./db";
 import { todayStr } from "./date";
+import { responseText } from "./model";
 import { formatPace, paceSecPerKm } from "./pace";
 import {
   adherenceOverall,
@@ -203,8 +204,9 @@ export function coerceProposal(
 }
 
 // Calls Claude to design the rebuilt sessions. Throws if ANTHROPIC_API_KEY is
-// missing or the API call fails; callers handle that. Returns null when the
-// response can't be coerced into a valid proposal for the expected dates.
+// missing, the API call fails, or the response was truncated; callers handle
+// that. Returns null when a complete response can't be coerced into a valid
+// proposal for the expected dates.
 export async function generatePlanRebuild(
   sessions: Session[],
   profile: Profile,
@@ -224,11 +226,7 @@ export async function generatePlanRebuild(
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
+  const text = responseText(response, "rebuild");
   if (!text) return null;
 
   try {

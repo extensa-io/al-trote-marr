@@ -43,6 +43,24 @@ export async function getProfile(owner: string): Promise<Profile | null> {
   return db.collection<Profile>("profile").findOne({ ownerEmail: owner }, NO_ID);
 }
 
+// Set (or clear, with an empty string) the runner's standing constraints. There
+// is no profile editor in the UI yet, so this exists for the one-shot script.
+export async function setTrainingContext(
+  owner: string,
+  trainingContext: string
+): Promise<boolean> {
+  const db = await getDb();
+  const result = await db
+    .collection<Profile>("profile")
+    .updateOne(
+      { ownerEmail: owner },
+      trainingContext
+        ? { $set: { trainingContext } }
+        : { $unset: { trainingContext: "" } }
+    );
+  return result.matchedCount > 0;
+}
+
 export async function updateSession(
   owner: string,
   date: string,

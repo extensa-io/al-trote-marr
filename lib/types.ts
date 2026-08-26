@@ -7,6 +7,17 @@ export interface Actual {
   durationMin?: number;
   weightKg?: number;
   notes?: string;
+  // A deliberate hard effort run to measure current fitness, rather than the
+  // prescribed session. It is a property of what was run, not of what was
+  // planned, so it lives here and not on `Session.type` — the runner decides at
+  // log time, and no session type needs editing.
+  //
+  // Two effects, both in lib/stats.ts: the run feeds the speed-based race
+  // projection whatever its session type, and it is excluded from every
+  // easy-run metric (zone adherence, aerobic efficiency, pace comparisons),
+  // where a maximal effort would otherwise read as lost fitness or broken
+  // discipline. It still counts for adherence, volume, and longest run.
+  testEffort?: boolean;
 }
 
 export interface StrengthExercise {
@@ -83,4 +94,10 @@ export interface Profile {
   vo2: number;
   goalPaceSecPerKm: number;
   zones: Zone[];
+  // Standing facts about how this runner trains that change how their numbers
+  // should be read, in the runner's own words. Injected into every AI prompt.
+  // The case it exists for: easy Z2 runs done as run/walk intervals, where
+  // average pace reflects the walk ratio rather than fitness, so a pace delta is
+  // not a fitness signal. Absent for a runner with nothing to declare.
+  trainingContext?: string;
 }
