@@ -53,10 +53,9 @@ These are judgement calls, not bugs. Listed here so they don't get lost in the d
 
 ---
 
-## Dependency hygiene, deferred out of the driver 7 bump
+## Dependency hygiene
 
-Deliberately left alone when `mongodb` went to `^7.6` on 2026-08-28, to keep that change reviewable. None is caused by the driver bump; all predate it.
+`npm audit` is at zero as of 2026-08-28 and should stay there. Two items remain, both of which need a person rather than a version bump.
 
-- **`npm audit` reports 9 vulnerabilities** (1 moderate, 6 high, 2 critical). The critical one is `@auth/core <=0.41.2`, reached through `next-auth@5.0.0-beta.31`, and needs `--force`, so it is a next-auth version decision rather than a patch. The high ones (`brace-expansion`, `js-yaml`, `nanoid`, `postcss`, `sharp`, `next`) claim a non-breaking `npm audit fix`. Run that as its own change and re-verify the build.
 - **`recharts@2.15.4` is deprecated**; the 2.x branch is no longer active and v3 is a migration, not a bump. Charts are the whole dashboard, so this needs a real look rather than a version change.
-- **Driver 7's `bulkWrite` path is still unexercised.** Verified against production on 2026-08-28: signed in, the plan loads, and rescheduling works, which covers the `find`/`sort`/`toArray` reads and the `moveSessions` transaction with its temp-date staging. Not yet driven on driver 7: `rebuildFutureSessions` (the guarded `bulkWrite` behind the AI Rebuild control on `/plan`), the `replaceOne(upsert)` writes for recaps, summaries and explanations, and `deletePushSubscription`. There are no tests, so one deliberate pass through Rebuild and a logged run is the only way to close this.
+- **Three driver 7 write paths are unexercised.** Verified against production on 2026-08-28: signed in, the plan loads, and rescheduling works, which covers the `find`/`sort`/`toArray` reads and the `moveSessions` transaction with its temp-date staging. Not yet driven on driver 7: `rebuildFutureSessions` (the guarded `bulkWrite` behind the AI Rebuild control on `/plan`), the `replaceOne(upsert)` writes for recaps, summaries and explanations, and `deletePushSubscription`. There are no tests, so a Rebuild preview-and-apply plus one logged run is the only way to close this. Adding the tests listed above would close it permanently instead.

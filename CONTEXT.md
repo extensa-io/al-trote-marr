@@ -330,7 +330,7 @@ Two steps, both auth-checked server actions.
 | Lint | ESLint 9 flat config: `eslint-config-next` + core-web-vitals + typescript |
 | Scripts | `tsx` |
 
-The table gives declared ranges. As resolved in `package-lock.json` on 2026-08-28: `next` 16.2.9, `react`/`react-dom` 19.2.7, `mongodb` 7.6.0, `typescript` 5.9.3, `eslint` 9.39.4, `eslint-config-next` 16.2.9. ESLint stays on 9.x deliberately: `eslint-config-next@16` bundles `eslint-plugin-import` and `eslint-plugin-jsx-a11y`, both capped at `eslint ^9`, so moving to 10 installs with unmet peers. There is no adapter in the tree — auth uses JWT sessions and never touches Mongo — so the `@auth/mongodb-adapter` `mongodb ^6` peer constraint does not apply here and no `overrides` block is needed.
+The table gives declared ranges. As resolved in `package-lock.json` on 2026-08-28: `next` 16.3.3, `react`/`react-dom` 19.2.7, `mongodb` 7.6.0, `next-auth` 5.0.0-beta.32 (`@auth/core` 0.41.3), `typescript` 5.9.3, `eslint` 9.39.4, `eslint-config-next` 16.3.3. `npm audit` reports zero vulnerabilities at that resolution; keep it there. `eslint-config-next` is held level with `next` deliberately, since a lint config trailing its framework by a minor is how rule drift starts. ESLint stays on 9.x deliberately: `eslint-config-next@16` bundles `eslint-plugin-import` and `eslint-plugin-jsx-a11y`, both capped at `eslint ^9`, so moving to 10 installs with unmet peers. There is no adapter in the tree — auth uses JWT sessions and never touches Mongo — so the `@auth/mongodb-adapter` `mongodb ^6` peer constraint does not apply here and no `overrides` block is needed.
 
 Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired as CSS variables in `app/layout.tsx`.
 
