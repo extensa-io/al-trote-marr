@@ -318,7 +318,7 @@ Two steps, both auth-checked server actions.
 
 | | |
 |---|---|
-| Runtime | Node.js `22.x`, pinned in `engines` and `.nvmrc`; scripts need Node 22+ for `--env-file`. Pinned to the major, not an open floor, so Vercel's runtime matches `.nvmrc` instead of drifting to the newest LTS |
+| Runtime | Node.js `24.x`, pinned in `engines` and `.nvmrc`; scripts need Node 22+ for `--env-file`. Pinned to the major, not an open floor, so Vercel's runtime matches `.nvmrc` instead of drifting on its own; 24 is Vercel's current default LTS and what production already ran |
 | Framework | Next.js `^16.0.0`, App Router, React `^19` |
 | Language | TypeScript `^5.7`, `strict: true`, `noEmit`, `@/*` → repo root |
 | Database | MongoDB Atlas via `mongodb` `^7.6` (native driver only) |
