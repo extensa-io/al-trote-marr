@@ -318,10 +318,10 @@ Two steps, both auth-checked server actions.
 
 | | |
 |---|---|
-| Runtime | Node.js (Vercel Functions); scripts need Node 22+ for `--env-file` |
+| Runtime | Node.js `22.x`, pinned in `engines` and `.nvmrc`; scripts need Node 22+ for `--env-file`. Pinned to the major, not an open floor, so Vercel's runtime matches `.nvmrc` instead of drifting to the newest LTS |
 | Framework | Next.js `^16.0.0`, App Router, React `^19` |
 | Language | TypeScript `^5.7`, `strict: true`, `noEmit`, `@/*` → repo root |
-| Database | MongoDB Atlas via `mongodb` `^6.12` (native driver only) |
+| Database | MongoDB Atlas via `mongodb` `^7.6` (native driver only) |
 | Auth | `next-auth` `5.0.0-beta.31`, Google provider, JWT sessions |
 | Styling | Tailwind CSS v4 via `@tailwindcss/postcss`; tokens in `@theme` in `app/globals.css` |
 | Charts | `recharts` `^2.15` |
@@ -329,6 +329,8 @@ Two steps, both auth-checked server actions.
 | Push | `web-push` `^3.6` |
 | Lint | ESLint 9 flat config: `eslint-config-next` + core-web-vitals + typescript |
 | Scripts | `tsx` |
+
+The table gives declared ranges. As resolved in `package-lock.json` on 2026-08-28: `next` 16.2.9, `react`/`react-dom` 19.2.7, `mongodb` 7.6.0, `typescript` 5.9.3, `eslint` 9.39.4, `eslint-config-next` 16.2.9. ESLint stays on 9.x deliberately: `eslint-config-next@16` bundles `eslint-plugin-import` and `eslint-plugin-jsx-a11y`, both capped at `eslint ^9`, so moving to 10 installs with unmet peers. There is no adapter in the tree — auth uses JWT sessions and never touches Mongo — so the `@auth/mongodb-adapter` `mongodb ^6` peer constraint does not apply here and no `overrides` block is needed.
 
 Fonts: `Space_Grotesk` (display), `Inter` (body), `JetBrains_Mono` (mono), wired as CSS variables in `app/layout.tsx`.
 

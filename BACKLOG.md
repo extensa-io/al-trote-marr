@@ -50,3 +50,13 @@ These are judgement calls, not bugs. Listed here so they don't get lost in the d
 
 - Decide whether `PATCH /api/sessions/[date]` and the read API are a supported surface or dead weight (drift 1).
 - Add tests for the pure modules: `lib/stats.ts`, `lib/pace.ts`, `lib/date.ts`, `lib/validation.ts`, and `coerceProposal`. They were factored to be testable and never were.
+
+---
+
+## Dependency hygiene, deferred out of the driver 7 bump
+
+Deliberately left alone when `mongodb` went to `^7.6` on 2026-08-28, to keep that change reviewable. None is caused by the driver bump; all predate it.
+
+- **`npm audit` reports 9 vulnerabilities** (1 moderate, 6 high, 2 critical). The critical one is `@auth/core <=0.41.2`, reached through `next-auth@5.0.0-beta.31`, and needs `--force`, so it is a next-auth version decision rather than a patch. The high ones (`brace-expansion`, `js-yaml`, `nanoid`, `postcss`, `sharp`, `next`) claim a non-breaking `npm audit fix`. Run that as its own change and re-verify the build.
+- **`recharts@2.15.4` is deprecated**; the 2.x branch is no longer active and v3 is a migration, not a bump. Charts are the whole dashboard, so this needs a real look rather than a version change.
+- **Driver 7 has no runtime proof yet.** There are no tests, so the only evidence so far is a clean install, a passing typecheck against the v7 types, and a successful build. The read and write paths in `lib/db.ts` still need one deliberate pass against a live database, in particular the `moveSessions` transaction and the `rebuildFutureSessions` `bulkWrite`.
