@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { currentOwner } from "@/lib/owner";
-import { setProfileContext } from "@/lib/db";
-import { validateProfileContext } from "@/lib/validation";
+import { setProfileContext, setRaceGoal } from "@/lib/db";
+import { validateGoalTime, validateProfileContext } from "@/lib/validation";
+import { RACE_DISTANCE_KM } from "@/lib/stats";
 
 export type ProfileContextResult = { ok: boolean; error?: string };
 
@@ -29,5 +30,33 @@ export async function saveProfileContext(input: {
   }
 
   revalidatePath("/settings");
+  return { ok: true };
+}
+
+// Set the race goal from a target finish time. The goal and its pace are
+// anchors the plan rebuild may not touch, so when they outrun the evidence only
+// the runner can correct them; every projection, prescription and note reads
+// these two fields.
+export async function saveRaceGoal(targetTime: string): Promise<ProfileContextResult> {
+  const owner = await currentOwner();
+  if (!owner) return { ok: false, error: "unauthorized" };
+
+  const validated = validateGoalTime(targetTime, RACE_DISTANCE_KM);
+  if (!validated.ok) return { ok: false, error: validated.error };
+
+  try {
+    const matched = await setRaceGoal(owner, validated.value);
+    if (!matched) return { ok: false, error: "no profile to update" };
+  } catch (err) {
+    console.error(`race goal save failed for ${owner}:`, err);
+    return { ok: false, error: "couldn't save" };
+  }
+
+  // The goal feeds the dashboard projection card and every prescription, so the
+  // plan and dashboard need revalidating too, not just settings.
+  revalidatePath("/settings");
+  revalidatePath("/dashboard");
+  revalidatePath("/plan");
+  revalidatePath("/");
   return { ok: true };
 }

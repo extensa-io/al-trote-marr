@@ -67,6 +67,37 @@ export function validateProfileContext(
   return { ok: true, value: { trainingContext: training.value, zonesSource: zones.value } };
 }
 
+// A target finish time, entered as "3:20" or "3:20:00". Returns the stored pair:
+// the goal string every prompt reads, and the pace it implies over the race
+// distance. Deriving the pace rather than asking for it is the point — the two
+// were free to disagree before, and a goal pace nobody could hold is what made
+// the plan prescribe unrunnable sessions.
+export function validateGoalTime(
+  input: unknown,
+  raceDistanceKm: number
+): ValidationResult<{ goal: string; goalPaceSecPerKm: number }> {
+  if (typeof input !== "string" || !input.trim())
+    return { ok: false, error: "enter a target time like 3:20" };
+
+  const parts = input.trim().split(":");
+  if (parts.length < 2 || parts.length > 3 || parts.some((p) => !/^\d{1,2}$/.test(p)))
+    return { ok: false, error: "use h:mm or h:mm:ss" };
+
+  const [h, m, s = "0"] = parts;
+  if (Number(m) > 59 || Number(s) > 59)
+    return { ok: false, error: "minutes and seconds must be under 60" };
+
+  const totalSeconds = Number(h) * 3600 + Number(m) * 60 + Number(s);
+  if (totalSeconds < 3600 || totalSeconds > 8 * 3600)
+    return { ok: false, error: "target must be between 1 and 8 hours" };
+
+  const label = `sub-${h}:${m.padStart(2, "0")}${Number(s) ? `:${s.padStart(2, "0")}` : ""}`;
+  return {
+    ok: true,
+    value: { goal: label, goalPaceSecPerKm: Math.round(totalSeconds / raceDistanceKm) },
+  };
+}
+
 export function validateActual(input: ActualInput): ValidationResult<Actual> {
   const out: Actual = {};
 

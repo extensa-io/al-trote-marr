@@ -18,12 +18,25 @@ Respond with a single paragraph of 2 to 4 sentences and nothing else. No markdow
 
 Decode every abbreviation into ordinary words: WU means warm-up, CD means cool-down, Z1 to Z5 are heart-rate zones (name the zone and give its bpm range when provided), a "jog" between efforts is easy recovery, and "x" means repeats (so "2x8 min Z3" is two 8-minute efforts at the Z3 pace). Say plainly what to run, at what effort, for how long, and how to recover between efforts. Add at most one short clause on the point of the session. Ground everything in the data given; never invent paces, distances, or times that the prescription does not imply. Voice: plain, warm, like a knowledgeable coach. No hype, no clichés, no emoji. Use ordinary running language only; never military, drill, or boot-camp vocabulary.`;
 
-// Stable cache key for a workout's prescription. Two sessions with the same
-// type/zone/title/plannedKm share an explanation, so it is generated once and
-// reused across every week it recurs. Editing any of these fields changes the
-// key and yields a fresh explanation.
-export function explanationKey(session: Session): string {
-  const normalized = [session.type, session.zone, session.title, session.plannedKm].join("|");
+// Cache key for one explanation. Two sessions that share a prescription AND the
+// profile inputs the prompt reads share an explanation, so it is generated once
+// and reused across every week the workout recurs. Changing any input yields a
+// fresh explanation and orphans the old row (see CONTEXT.md section 9).
+export function explanationKey(session: Session, profile: Profile): string {
+  // Everything the prompt reads has to be in the key, not just the prescription.
+  // Goal pace and the zone table are both injected into the explanation, so a
+  // key built from the workout alone goes stale silently: changing the race goal
+  // left every cached "at goal pace" explanation quoting the old pace forever,
+  // because nothing about the workout had changed.
+  const zones = profile.zones.map((z) => `${z.z}:${z.min}-${z.max}`).join(",");
+  const normalized = [
+    session.type,
+    session.zone,
+    session.title,
+    session.plannedKm,
+    profile.goalPaceSecPerKm,
+    zones,
+  ].join("|");
   return createHash("sha1").update(normalized).digest("hex").slice(0, 16);
 }
 
@@ -107,7 +120,7 @@ export async function getOrCreateExplanation(
   if (!session) return { status: "no-session" };
   if (session.type === "Strength") return { status: "not-a-run" };
 
-  const key = explanationKey(session);
+  const key = explanationKey(session, profile);
   const cached = await getSessionExplanation(owner, key);
   if (cached) return { status: "ready", text: cached.text };
 

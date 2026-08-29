@@ -43,6 +43,21 @@ export async function getProfile(owner: string): Promise<Profile | null> {
   return db.collection<Profile>("profile").findOne({ ownerEmail: owner }, NO_ID);
 }
 
+// Set the race goal and the pace it implies. These are anchors the plan rebuild
+// is forbidden to change, which is exactly why they need a write path of their
+// own: when the goal outruns the evidence, every rebuild keeps prescribing a
+// pace the runner cannot hold, and nothing in the app can correct it.
+export async function setRaceGoal(
+  owner: string,
+  goal: { goal: string; goalPaceSecPerKm: number }
+): Promise<boolean> {
+  const db = await getDb();
+  const result = await db
+    .collection<Profile>("profile")
+    .updateOne({ ownerEmail: owner }, { $set: goal });
+  return result.matchedCount > 0;
+}
+
 // Set the runner's free-text context fields. An empty string clears the field
 // rather than storing one, so the document never carries an empty value. Only
 // the keys present in `patch` are touched.

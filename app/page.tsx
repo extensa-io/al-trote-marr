@@ -91,7 +91,7 @@ export default async function Home() {
 
           {todaySession && todaySession.type !== "Strength" && (
             <div className="mt-6">
-              <SessionExplainer owner={owner} session={todaySession} />
+              <SessionExplainer owner={owner} session={todaySession} profile={profile} />
             </div>
           )}
 

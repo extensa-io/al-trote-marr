@@ -6,6 +6,7 @@ import { formatNiceDate } from "@/lib/date";
 import PageHeader from "@/app/_components/PageHeader";
 import DailyReminderToggle from "./_components/DailyReminderToggle";
 import ContextEditor from "./_components/ContextEditor";
+import GoalEditor from "./_components/GoalEditor";
 
 export default async function Settings() {
   const session = await auth();
@@ -41,6 +42,10 @@ export default async function Settings() {
               <Row label="Baseline" value={profile.baseline} />
               <Row label="Goal pace" value={formatPace(profile.goalPaceSecPerKm)} />
             </dl>
+            <GoalEditor
+              goal={profile.goal}
+              goalPace={formatPace(profile.goalPaceSecPerKm)}
+            />
           </section>
 
           <section className="border border-line bg-panel rounded-md p-5 mb-4">

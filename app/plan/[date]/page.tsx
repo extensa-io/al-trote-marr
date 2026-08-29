@@ -58,9 +58,11 @@ export default async function PlanDate({ params }: PageProps) {
         />
       )}
 
-      {target.type !== "Strength" && (
+      {/* No profile means no zone table and no goal pace, so there is nothing to
+          explain the workout against. */}
+      {target.type !== "Strength" && profile && (
         <div className="mt-6">
-          <SessionExplainer owner={owner} session={target} />
+          <SessionExplainer owner={owner} session={target} profile={profile} />
         </div>
       )}
 

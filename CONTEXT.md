@@ -139,7 +139,7 @@ One document per runner. Type: `Profile`.
 
 The prompts are told that a metric one of these explains is not a fitness signal. Both are edited in the **How your numbers are read** section of `/settings` (`ContextEditor` → `saveProfileContext` → `setProfileContext`), which is the only supported write path: a script existed first and was removed once the UI landed, because two write paths for one field is the drift this document warns about elsewhere. Saving affects future generations only; recaps already stored are not rewritten.
 
-No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$set}, {upsert:true})` from seed scripts, plus `setProfileContext` for the two free-text context fields. Everything else on the profile — race, goal, goal pace, max HR, the zone table — is seed-only and has no editor.
+No unique index is created on `profile`. Writes are `updateOne({ownerEmail}, {$set}, {upsert:true})` from seed scripts, plus `setProfileContext` for the two free-text context fields and `setRaceGoal` for `goal` + `goalPaceSecPerKm`. Race name and date, max HR, `vo2`, `baseline`, and the zone table remain seed-only with no editor.
 
 ### `pushSubscriptions`
 
@@ -165,7 +165,9 @@ Keyed `(ownerEmail, date)`. **Two shapes share one key**, distinguished by `kind
 
 ### `sessionExplanations`
 
-`{ ownerEmail, key, text, model, createdAt }`. `key` is `sha1(type|zone|title|plannedKm).slice(0,16)` from `explanationKey()`. Content-addressed on purpose: the ~15 distinct workouts across a 17-week plan generate once and are reused on every recurrence. Editing any of those four fields yields a new key and a fresh explanation; the old row is orphaned (harmless, never collected).
+`{ ownerEmail, key, text, model, createdAt }`. `key` is `sha1(type|zone|title|plannedKm|goalPaceSecPerKm|zones).slice(0,16)` from `explanationKey(session, profile)`. Content-addressed on purpose: the ~15 distinct workouts across a 17-week plan generate once and are reused on every recurrence. Changing any input yields a new key and a fresh explanation; the old row is orphaned (harmless, never collected).
+
+**The key must cover every input the prompt reads, not just the workout.** `buildExplainPrompt` injects the goal pace and the zone table alongside the prescription, and the key originally hashed the prescription alone — so changing the race goal left every cached "at goal pace" explanation quoting the old pace, permanently, with nothing to invalidate it. If you add a profile field to that prompt, add it to the key in the same change.
 
 **Index:** `{ ownerEmail: 1, key: 1 }` unique, declared in `lib/indexes.ts`.
 
@@ -175,6 +177,7 @@ Only in `lib/validation.ts`, applied by `PATCH /api/sessions/[date]` and by the 
 
 - `status` ∈ `["planned","done","skipped"]`.
 - `km` > 0; `durationMin` > 0; `avgHr` ∈ [30, 230]; `weightKg` ∈ [30, 300]; `notes` ≤ 500 chars, trimmed.
+- `validateGoalTime`: a target finish time as `h:mm` or `h:mm:ss`, between 1 and 8 hours, minutes and seconds under 60. Returns the pair actually stored — the `sub-h:mm` label and the pace it implies over `RACE_DISTANCE_KM` — so the two can never disagree. The runner enters the time; the pace is derived, never typed.
 - `validateProfileContext`: `trainingContext` ≤ 1000 chars, `zonesSource` ≤ 500, both trimmed. Here an empty string means **clear the field**, not "omitted" — the opposite of `validateActual` — so `setProfileContext` `$unset`s it and the document never stores an empty value.
 - `testEffort` accepts `true` / `"true"` (stored) and `false` / `"false"` / empty (omitted); anything else is rejected. Never stored as `false`.
 - Empty string / `null` / `undefined` means "field omitted", not "invalid".
@@ -437,6 +440,7 @@ Currently only the two push endpoints are called from app code (`DailyReminderTo
 | `rescheduleRun(from, to, { swap? })` | `actions/sessions.ts` | `RescheduleResult` (may carry a `conflict`) |
 | `shiftWeek(week, deltaDays)` | `actions/sessions.ts` | `ShiftResult` |
 | `saveProfileContext({ trainingContext?, zonesSource? })` | `actions/profile.ts` | `ProfileContextResult` |
+| `saveRaceGoal(targetTime)` | `actions/profile.ts` | `ProfileContextResult` (revalidates `/`, `/plan`, `/dashboard`, `/settings`) |
 | `generateRecap(date, { force? })` | `actions/recap.ts` | `RecapActionResult` (`force` re-bills, bypassing the `runUpdatedAt` check) |
 | `explainSession(date)` | `actions/explain.ts` | `ExplainActionResult` |
 | `previewPlanRebuild()` | `actions/rebuild.ts` | `PreviewResult` (no writes) |
@@ -644,7 +648,7 @@ Ordered roughly by how much they'd bite.
 
 1. **Two write paths for the same mutation.** `PATCH /api/sessions/[date]` and `logActual`/`markStatus` both validate and call `updateSession`, but only the actions are used by the UI. The REST route was the original Phase 1 mechanism; the implementation moved to server actions and the route was left in place. Decide whether it is a supported surface or dead weight.
 
-2. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever a title or plannedKm is edited (including by every rebuild).
+2. **Dead or unused code:** `VALID_STATUS` exported but only used internally, `profile.vo2` and `profile.baseline` (displayed, never computed with), `getNextSession` used only by the home page, and orphaned `sessionExplanations` rows whenever any keyed input changes — a title, `plannedKm`, the goal pace, or the zone table (including by every rebuild).
 
 3. **`ALLOWED_EMAILS` has a hardcoded production fallback.** `lib/allowlist.ts` defaults to `"nestor.daza@gmail.com,lilo.ayala@gmail.com"` when the env var is unset. Convenient locally; means a misconfigured production deploy still admits two accounts rather than failing closed. Deliberate or not, it should be a decision.
 
