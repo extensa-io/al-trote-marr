@@ -10,7 +10,7 @@ Everything below was derived by reading the implementation. It supersedes the fo
 
 ### What it is
 
-A personal, multi-tenant half-marathon training tracker for a tiny fixed set of runners (currently two: `nestor.daza@gmail.com` and `lilo.ayala@gmail.com`, per `lib/allowlist.ts` and `.env.example`). Each runner has one authored 17-week plan seeded into MongoDB, sees the day's prescribed session, logs what they actually did, and gets stats, charts, AI coaching prose, and a daily push reminder.
+A personal, multi-tenant half-marathon training tracker for a tiny fixed set of runners (currently two: `nestor.daza@gmail.com` and `lilo.ayala@gmail.com`, per `lib/allowlist.ts` and `.env.example`). Each runner has an authored plan seeded into MongoDB, sees the day's prescribed session, logs what they actually did, and gets stats, charts, AI coaching prose, and a daily push reminder. Néstor's current plan extends through a provisional March 20, 2027 race target.
 
 The problem it solves: replacing a spreadsheet training plan with a phone-first app that (a) shows only what matters today, (b) captures a run in a handful of taps, (c) computes adherence and aerobic-fitness trends from the logged data, and (d) uses an LLM to explain prescriptions, recap runs, and re-scale the plan when authored volume outruns real fitness.
 
@@ -128,7 +128,7 @@ One document per training session (run or strength). Type: `Session` in `lib/typ
 
 ### `profile`
 
-One document per runner. Type: `Profile`.
+One document per runner. Type: `Profile`. Néstor's current seeded profile targets March 20, 2027 and carries a provisional sub-2:30 goal (7:06/km), pending fitness checkpoints.
 
 `{ ownerEmail, raceName, raceDate (YYYY-MM-DD), goal, baseline, maxHr, vo2, goalPaceSecPerKm, zones: Zone[], trainingContext?, zonesSource? }`, where `Zone` is `{ z, name, min, max }` covering Z1..Z5.
 
@@ -462,7 +462,7 @@ Six structural elements aren't covered by sections 1-6 and are load-bearing here
 - **The one unscoped read:** `listAllPushSubscriptions()`, used solely by the cron, which then regroups by owner and loads each plan separately.
 - **The cron's owner list** comes from `ALLOWED_EMAILS`, not from the database — a runner removed from the allowlist stops getting notes even if their data remains.
 - **An allowlisted user with no `profile` is valid** and must render an empty state, not an error. `/`, `/plan`, `/dashboard`, and `/settings` all have one.
-- **Seeds are per-owner and additive.** `scripts/seed.ts` is destructive for Néstor only (`deleteMany` scoped to `OWNER`). `seed-lilo.ts` and `add-strength.ts` use `$setOnInsert` upserts on the unique key and only touch dates `>= today`, so they never clobber logged history.
+- **Seeds are per-owner and additive.** `scripts/seed.ts` preserves Néstor's existing sessions and replaces only unlogged sessions from the extension start (`2026-10-06`) onward, then inserts the indoor winter extension with `$setOnInsert`; it never clobbers logged history. `seed-lilo.ts` and `add-strength.ts` use `$setOnInsert` upserts on the unique key and only touch dates `>= today`, so they never clobber logged history.
 
 ### 7.2 Scheduled job inventory
 

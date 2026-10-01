@@ -1,4 +1,4 @@
-import { shiftDays } from "./date";
+import { daysBetween, shiftDays } from "./date";
 import type { Phase, Profile, Session, StrengthExercise } from "./types";
 
 export const OWNER = "nestor.daza@gmail.com";
@@ -7,12 +7,12 @@ export const STRENGTH_TYPE = "Strength";
 export const profile: Profile = {
   ownerEmail: OWNER,
   raceName: "Half Marathon",
-  raceDate: "2026-10-11",
-  goal: "sub-2:45",
+  raceDate: "2027-03-20",
+  goal: "sub-2:30 (provisional)",
   baseline: "2:51 (2024)",
   maxHr: 187,
   vo2: 36,
-  goalPaceSecPerKm: 469, // 7:49/km
+  goalPaceSecPerKm: 426, // 7:06/km
   zones: [
     { z: 1, name: "Recovery", min: 94, max: 112 },
     { z: 2, name: "Easy", min: 112, max: 131 },
@@ -196,4 +196,120 @@ export function generateStrengthSessions(runDates: Set<string>): Seed[] {
 
 export const strengthSessions: Seed[] = generateStrengthSessions(
   new Set(sessions.map((s) => s.date))
+);
+
+// Winter extension: three runs per week from the old plan's final taper week
+// through the provisional 20 March 2027 race. Indoor long runs are prescribed
+// by time first, with distance only an estimate for plan totals. Thursday work
+// supplies controlled pace stimulus without turning every indoor session into a
+// long, monotonous run.
+export const EXTENSION_START = "2026-10-06";
+const EXTENSION_RACE = "2027-03-20";
+const EXTENSION_WEEK1_MONDAY = "2026-10-05";
+
+const LONG_RUNS: ReadonlyArray<{ title: string; km: number }> = [
+  { title: "60 min easy indoors", km: 6.5 },
+  { title: "70 min easy indoors", km: 7.5 },
+  { title: "75 min easy indoors", km: 8.0 },
+  { title: "60 min easy indoors (cutback)", km: 6.5 },
+  { title: "80 min easy indoors", km: 8.5 },
+  { title: "85 min easy indoors", km: 9.0 },
+  { title: "75 min easy indoors (cutback)", km: 8.0 },
+  { title: "90 min easy indoors", km: 9.5 },
+  { title: "75 min easy, last 15 min steady", km: 8.5 },
+  { title: "90 min easy indoors", km: 9.5 },
+  { title: "100 min easy indoors (longest indoor trial)", km: 10.5 },
+  { title: "75 min easy indoors (cutback)", km: 8.0 },
+  { title: "90 min easy, last 20 min steady", km: 9.5 },
+  { title: "100 min easy indoors", km: 10.5 },
+  { title: "80 min easy indoors (cutback)", km: 8.5 },
+  { title: "90 min easy, 3x8 min steady (3 min easy)", km: 9.5 },
+  { title: "100 min easy indoors", km: 10.5 },
+  { title: "90 min easy indoors (cutback)", km: 9.5 },
+  { title: "100 min easy, last 25 min steady", km: 10.5 },
+  { title: "90 min easy indoors (cutback)", km: 9.5 },
+  { title: "90 min easy, 2x10 min at provisional race pace", km: 9.5 },
+  { title: "75 min easy indoors", km: 8.0 },
+  { title: "60 min easy indoors", km: 6.5 },
+];
+
+const QUALITY_TITLES: ReadonlyArray<{ title: string; zone: string; km: number }> = [
+  { title: "WU, 6x2 min controlled fast (2 min easy), CD", zone: "Z3-Z4", km: 5.5 },
+  { title: "WU, 3x6 min steady tempo (3 min easy), CD", zone: "Z3", km: 6.0 },
+  { title: "WU, 2x10 min steady tempo (4 min easy), CD", zone: "Z3", km: 6.5 },
+  { title: "WU, 5x3 min controlled fast (2 min easy), CD", zone: "Z3-Z4", km: 6.0 },
+  { title: "WU, 3x8 min tempo (3 min easy), CD", zone: "Z3", km: 7.0 },
+  { title: "WU, 20 min continuous tempo, CD", zone: "Z3", km: 6.5 },
+  { title: "WU, 4x5 min tempo (2 min easy), CD", zone: "Z3-Z4", km: 7.0 },
+  { title: "WU, 6x3 min controlled fast (2 min easy), CD", zone: "Z3-Z4", km: 7.0 },
+  { title: "WU, 2x12 min tempo (4 min easy), CD", zone: "Z3", km: 7.5 },
+  { title: "WU, 25 min continuous tempo, CD", zone: "Z3", km: 7.5 },
+  { title: "WU, 5x5 min tempo (2 min easy), CD", zone: "Z3-Z4", km: 8.0 },
+  { title: "WU, 3x10 min tempo (3 min easy), CD", zone: "Z3", km: 8.0 },
+  { title: "WU, 8x2 min controlled fast (2 min easy), CD", zone: "Z3-Z4", km: 7.0 },
+  { title: "WU, 30 min tempo, CD", zone: "Z3", km: 8.0 },
+  { title: "WU, 4x6 min tempo (2 min easy), CD", zone: "Z3-Z4", km: 8.0 },
+  { title: "WU, 3x8 min at provisional race pace (3 min easy), CD", zone: "Z3", km: 8.0 },
+  { title: "WU, 6x4 min tempo (2 min easy), CD", zone: "Z3-Z4", km: 8.0 },
+  { title: "10 km fitness checkpoint: controlled hard effort with full WU/CD", zone: "Z4", km: 11.5 },
+  { title: "WU, 4x8 min at provisional race pace (3 min easy), CD", zone: "Z3", km: 8.5 },
+  { title: "WU, 20 min at provisional race pace, 5 min easy, 10 min at pace, CD", zone: "Z3", km: 8.0 },
+  { title: "5 km fitness checkpoint: controlled hard effort with full WU/CD", zone: "Z4", km: 6.5 },
+  { title: "WU, 3x5 min at provisional race pace (3 min easy), CD", zone: "Z3", km: 6.5 },
+  { title: "WU, 4x2 min relaxed fast (2 min easy), CD", zone: "Z3-Z4", km: 5.5 },
+];
+
+function extensionPhase(week: number): Phase {
+  if (week <= 21) return "Base";
+  if (week <= 31) return "Build";
+  if (week <= 38) return "Peak";
+  return "Taper";
+}
+
+export const extensionSessions: Seed[] = [
+  ...Array.from({ length: 23 }, (_, index) => {
+    const week = 18 + index;
+    const monday = shiftDays(EXTENSION_WEEK1_MONDAY, index * 7);
+    const tue = shiftDays(monday, 1);
+    const thu = shiftDays(monday, 3);
+    const sat = shiftDays(monday, 5);
+    const quality = QUALITY_TITLES[index];
+    const long = LONG_RUNS[index];
+    return [
+      { week, date: tue, day: "Tue", phase: extensionPhase(week), type: "Easy", title: `${index < 4 ? 35 + index * 5 : 50} min easy indoors${index % 4 === 1 ? " + 4 strides" : ""}`, zone: "Z2", plannedKm: index < 4 ? 4.0 + index * 0.5 : 5.5 },
+      { week, date: thu, day: "Thu", phase: extensionPhase(week), type: "Quality", title: quality.title, zone: quality.zone, plannedKm: quality.km },
+      { week, date: sat, day: "Sat", phase: extensionPhase(week), type: "Long", title: long.title, zone: long.title.includes("steady") || long.title.includes("pace") ? "Z2-Z3" : "Z2", plannedKm: long.km },
+    ];
+  }).flat(),
+  { week: 41, date: "2027-03-16", day: "Tue", phase: "Taper", type: "Easy", title: "35 min easy indoors + 4 relaxed strides", zone: "Z2", plannedKm: 4.0 },
+  { week: 41, date: "2027-03-18", day: "Thu", phase: "Taper", type: "Quality", title: "WU, 3x2 min at provisional race pace (3 min easy), CD", zone: "Z3", plannedKm: 4.5 },
+  { week: 41, date: EXTENSION_RACE, day: "Sat", phase: "Taper", type: "Race", title: "RACE 21.1k. Reassess goal from checkpoint evidence, then pace evenly", zone: "Z2-Z3", plannedKm: 21.1 },
+];
+
+export function generateStrengthSessionsForWindow(
+  runDates: Set<string>,
+  start: string,
+  end: string,
+  firstWeek: number
+): Seed[] {
+  const out: Seed[] = [];
+  let i = 0;
+  for (let date = start; date <= end; date = shiftDays(date, 1)) {
+    const day = weekday(date);
+    const week = firstWeek + Math.floor(daysBetween(start, date) / 7);
+    // Keep three strength days through the build, then reduce to two during
+    // taper so the added running quality is supported without carrying fatigue.
+    if (day === "Sun" || runDates.has(date) || (week >= 39 && day === "Fri")) continue;
+    const circuit = CIRCUITS[i % CIRCUITS.length];
+    out.push({ week, date, day, phase: extensionPhase(week), type: STRENGTH_TYPE, title: circuit.title, zone: "", plannedKm: 0, exercises: circuit.exercises });
+    i++;
+  }
+  return out;
+}
+
+export const extensionStrengthSessions = generateStrengthSessionsForWindow(
+  new Set(extensionSessions.map((s) => s.date)),
+  EXTENSION_START,
+  EXTENSION_RACE,
+  18
 );

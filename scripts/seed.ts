@@ -1,6 +1,12 @@
 import { getDb } from "../lib/mongodb";
 import { ensureIndexes } from "../lib/indexes";
-import { OWNER, profile, sessions, strengthSessions } from "../lib/plan-seed";
+import {
+  OWNER,
+  profile,
+  extensionSessions,
+  extensionStrengthSessions,
+  EXTENSION_START,
+} from "../lib/plan-seed";
 
 async function main() {
   const db = await getDb();
@@ -11,15 +17,29 @@ async function main() {
     { upsert: true }
   );
 
-  const all = [...sessions, ...strengthSessions];
-  await db.collection("sessions").deleteMany({ ownerEmail: OWNER });
-  await db.collection("sessions").insertMany(
-    all.map((s) => ({ ...s, ownerEmail: OWNER, status: "planned" as const }))
-  );
+  // The extension is additive and only clears unlogged future prescriptions on
+  // its window. Historical sessions, including logged sessions from October,
+  // are never deleted or rewritten when the plan is re-seeded.
+  await db.collection("sessions").deleteMany({
+    ownerEmail: OWNER,
+    date: { $gte: EXTENSION_START },
+    status: { $ne: "done" },
+  });
+
+  const extension = [...extensionSessions, ...extensionStrengthSessions];
+  let inserted = 0;
+  for (const s of extension) {
+    const result = await db.collection("sessions").updateOne(
+      { ownerEmail: OWNER, date: s.date },
+      { $setOnInsert: { ...s, ownerEmail: OWNER, status: "planned" as const } },
+      { upsert: true }
+    );
+    inserted += result.upsertedCount;
+  }
   await ensureIndexes(db);
 
   console.log(
-    `Seeded ${sessions.length} runs + ${strengthSessions.length} strength sessions and 1 profile for ${OWNER}`
+    `Preserved the existing plan; ${inserted} extension sessions inserted from ${EXTENSION_START} and 1 profile for ${OWNER}`
   );
   process.exit(0);
 }
